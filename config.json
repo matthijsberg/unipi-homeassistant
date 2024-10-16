@@ -1,0 +1,12 @@
+{
+    "mqtt": {
+      "broker": "your_mqtt_broker",
+      "port": 1883,
+      "username": "your_username",
+      "password": "your_password",
+      "topic": "your/topic"
+    },
+    "websocket": {
+      "url": "ws://127.0.0.1/ws"
+    }
+  }

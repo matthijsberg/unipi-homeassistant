@@ -1,6 +1,14 @@
 import paho.mqtt.client as mqtt
 import json
 import time  # Import the time library
+import requests
+import logging
+
+# Configure logging
+log_file = "/var/log/unipi-mqtt.log"
+log_level = logging.DEBUG  # Change this line to set the desired log level
+logging.basicConfig(filename=log_file, level=log_level,
+                    format='%(asctime)s - %(levelname)s - %(message)s')
 
 # MQTT connection details
 mqtt_broker = "YOUR_MQTT_BROKER_IP"
@@ -53,15 +61,28 @@ def get_json_data():
     """Fetches JSON data from the specified URL."""
     url = "http://127.0.0.1:8080/json/all"
     try:
+        logging.debug(f"Fetching data from {url}")  # Debug level logging
         response = requests.get(url)
-        response.raise_for_status()  # Raise an error for bad status codes
-        return response.json()
+        response.raise_for_status()
+        data = response.json()
+        logging.debug(f"Received data: {data}")  # Debug level logging
+        return data
     except requests.exceptions.RequestException as e:
-        print(f"Error fetching data from {url}: {e}")
+        logging.error(f"Error fetching data from {url}: {e}")  # Error level logging
         return None
+
+
+###### MAIN ######
+logging.info("Starting UniPi MQTT script")  # Info level logging
 
 # Load JSON data from the URL
 data = get_json_data()
+if data:
+    logging.debug("Data fetched successfully")  # Debug level logging
+    # ... (rest of your data processing) ...
+else:
+    logging.warning("Failed to fetch data")  # Warning level logging
+
 
 # Iterate through entities and publish discovery information
 for entity_data in data:
