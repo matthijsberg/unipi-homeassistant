@@ -6,14 +6,23 @@ import websockets
 import queue
 import json
 import logging
+import logging.handlers
 import inspect
 import requests
 
-# Configure logging
+# Configure logging with RotatingFileHandler
 log_file = "/var/log/connection_test.log"
-log_level = logging.DEBUG
-logging.basicConfig(level=log_level,
-                    format='%(asctime)s - %(levelname)s - %(threadName)s - %(message)s')
+log_level = logging.INFO  # Changed to INFO
+# Rotating File Handler (Max 5MB, Keep 3 backups)
+handler = logging.handlers.RotatingFileHandler(
+    log_file, maxBytes=5 * 1024 * 1024, backupCount=3
+)
+formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(threadName)s - %(message)s')
+handler.setFormatter(formatter)
+logger = logging.getLogger()  # Get the root logger
+logger.setLevel(log
+_level)
+logger.addHandler(handler)
 
 # Load configuration from JSON file
 def load_config(config_file):
@@ -30,23 +39,22 @@ MQTT_TOPIC = config["mqtt"]["topic"]
 WEBSOCKET_URL = config["websocket"]["url"]
 UNIPI_URL = config["unipi_http"]["url"]  # Add UNIPI URL to config
 
-# Logging Decorator
+# Logging Decorator (Modified for flexibility)
 def log_function(func):
     def wrapper(*args, **kwargs):
-        logging.debug(f"** Function: {func.__name__} | Start **")
+        logger.debug(f"** Function: {func.__name__} | Start **")  # Use logger instead of logging
         result = func(*args, **kwargs)
-        logging.debug(f"** Function: {func.__name__} | End **")
+        logger.debug(f"** Function: {func.__name__} | End **")  # Use logger instead of logging
         return result
     return wrapper
 
-logging.debug(f"Using MQTT broker: {MQTT_BROKER}")
-logging.debug(f"Using WebSocket server: {WEBSOCKET_URL}")
-logging.debug(f"Using Unipi URL: {UNIPI_URL}")
+logger.debug(f"Using MQTT broker: {MQTT_BROKER}")  # Use logger instead of logging
+logger.debug(f"Using WebSocket server: {WEBSOCKET_URL}")  # Use logger instead of logging
+logger.debug(f"Using Unipi URL: {UNIPI_URL}")  # Use logger instead of logging
 
 # Couple of "global" vars to memorize some things from the initial discovery phase for later use 
 device_name = "" #device name created 
 mqtt_subscribe_topics = [] #array to store mqtt topics where we'll listen for on the bus (MQTT message to update unpi circuits over websocket)
-#last_values = {} #store mqtt messages to detect changes and only send changed topics / values over the bus.
 
 ####################################
 # FIRST BOOT MQTT - HASS DISCOVERY #
@@ -61,17 +69,21 @@ DEVICE_TYPE_MAPPING = {
     "led": "light",
     #"wd": "switch",
     #"modbus_slave": "sensor",
-    #"owbus": "switch"
+    #"owbus": "switch" #This is the ONE BUS.
 }
 
 # Function to retrieve JSON data from the UNIPI device via HTTP for initial run and publish all devices to HASSIO
 @log_function
 def get_unipi_data(url):
-    response = requests.get(url)
-    if response.status_code == 200:
+    try:
+        response = requests.get(url)
+        response.raise_for_status() # Raise an exception for bad status codes
         return response.json()
-    else:
-        print("Failed to retrieve UNIPI data")
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Failed to retrieve UNIPI data: {e}", exc_info=True) # Log error with exception details
+        return None
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to decode UNIPI JSON response: {e}", exc_info=True)
         return None
 
 # Function to generate MQTT update (values) messages for Home Assistant
@@ -357,9 +369,17 @@ def websocket_worker_thread():
         mqtt_to_websocket_queue.task_done()
 
 def mqtt_loop_thread():
+    while True:  # Keep trying to reconnect
+        try:
+            mqtt_client.reconnect()  # Attempt to reconnect
     while not should_stop.is_set():
-        mqtt_client.loop_start()
-        #mqtt_client.loop()
+                mqtt_client.loop(timeout=1.0)  # Use loop with timeout for better responsiveness
+        except (mqtt.WebsocketConnectionError, OSError) as e:
+            logging.error(f"MQTT connection error: {e}. Retrying in 5 seconds...")
+            time.sleep(5)  # Wait before retrying
+        except Exception as e:
+            logging.exception(f"Unexpected error in MQTT loop: {e}")
+            break
 
 # --- Main Thread ---
 if __name__ == "__main__":
@@ -374,14 +394,15 @@ if __name__ == "__main__":
     should_stop = threading.Event()
 
     try:
-        mqtt_client.connect(MQTT_BROKER, MQTT_PORT, keepalive=60)
+        mqtt_client.connect_async(MQTT_BROKER, MQTT_PORT, keepalive=60)  # Use connect_async
     except Exception as e:
         logging.error(f"Failed to connect to MQTT broker: {e}")
         exit(1)
 
-    mqtt_loop_thread = threading.Thread(target=mqtt_loop_thread)
-    mqtt_loop_thread.daemon = True
-    mqtt_loop_thread.start()
+    # Start the MQTT loop in a separate thread
+    mqtt_loop_thread_instance = threading.Thread(target=mqtt_loop_thread, name="MQTTLoopThread")
+    mqtt_loop_thread_instance.daemon = True
+    mqtt_loop_thread_instance.start()
 
     mqtt_worker = threading.Thread(target=mqtt_worker_thread)
     mqtt_worker.daemon = True
