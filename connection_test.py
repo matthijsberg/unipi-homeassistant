@@ -97,93 +97,104 @@ def generate_mqtt_topic(dev, circuit, topic_end):
 
 @log_function
 def json_to_mqtt_topics_discovery(mqtt_topic, json_data, device_info):
-    global device_name
-    global mqtt_subscribe_topics
-    device_model = device_info.get('model', 'unknown')
-    device_sn = device_info.get('sn', 'unknown')
-    device_family = device_info.get('family', 'unknown')
+    required_keys = ['dev', 'circuit']  # Add any other essential keys
+    if not all(key in json_data for key in required_keys):
+        missing_keys = [key for key in required_keys if key not in json_data]
+        logging.warning(f"Missing required keys in JSON data: {missing_keys}. Skipping message.")
+        return None  # Indicate that the message should be skipped
+    
+    # If all required keys are present, proceed with topic generation
+    try:
+        global device_name
+        global mqtt_subscribe_topics
+        device_model = device_info.get('model', 'unknown')
+        device_sn = device_info.get('sn', 'unknown')
+        device_family = device_info.get('family', 'unknown')
 
-    logging.debug(f"Extracted device info: model={device_model}, sn={device_sn}")
-    device_name = f"{device_family}_{device_model}_{device_sn}"
+        logging.debug(f"Extracted device info: model={device_model}, sn={device_sn}")
+        device_name = f"{device_family}_{device_model}_{device_sn}"
 
-    if json_data["dev"] in DEVICE_TYPE_MAPPING:
-        device_type_mapped = DEVICE_TYPE_MAPPING[json_data["dev"]]
-        entity_id = f"{json_data['dev']}_{json_data['circuit']}"
-        active_mode = json_data.get("mode") 
+        if json_data["dev"] in DEVICE_TYPE_MAPPING:
+            device_type_mapped = DEVICE_TYPE_MAPPING[json_data["dev"]]
+            entity_id = f"{json_data['dev']}_{json_data['circuit']}"
+            active_mode = json_data.get("mode") 
 
-        # Base config for all device types
-        config = {
-            "name": f"{json_data['dev']} {json_data['circuit']}",
-            "unique_id": f"{device_name}_{json_data['dev']}_{json_data['circuit']}",
-            "dev": {
-                "identifiers": f"{device_name}",
-                "name": f"Unipi {device_family} {device_model} ({device_sn})",
-                "manufacturer": "Unipi Technology s.r.o.",
-                "model": f"{device_family} {device_model}",
-                "sn": f"{device_sn}"
-            },
-            "origin": {
-                "name": "Unipi - HomeAssistant",
-                "sw": "0.1",
-                "url": "https://github.com/matthijsberg/unipi-homeassistant"
-            },
-            "state_topic": f"homeassistant/{device_type_mapped}/{device_name}/{entity_id}/state"
-        }
+            # Base config for all device types
+            config = {
+                "name": f"{json_data['dev']} {json_data['circuit']}",
+                "unique_id": f"{device_name}_{json_data['dev']}_{json_data['circuit']}",
+                "dev": {
+                    "identifiers": f"{device_name}",
+                    "name": f"Unipi {device_family} {device_model} ({device_sn})",
+                    "manufacturer": "Unipi Technology s.r.o.",
+                    "model": f"{device_family} {device_model}",
+                    "sn": f"{device_sn}"
+                },
+                "origin": {
+                    "name": "Unipi - HomeAssistant",
+                    "sw": "0.1",
+                    "url": "https://github.com/matthijsberg/unipi-homeassistant"
+                },
+                "state_topic": f"homeassistant/{device_type_mapped}/{device_name}/{entity_id}/state"
+            }
 
-        # Update config based on device type
-        if device_type_mapped == "binary_sensor":
-            #config["value_template"] = "{{ value }}"
-            config["payload_on"] = 1
-            config["payload_off"] = 0
-            #if json_data['circuit'] == 1:
-            #    config["icon"] = "mdi:electric-switch-closed"
-            #else:
-            #    config["icon"] = "mdi:electric-switch"
-            config["icon"] = "mdi:electric-switch"
-        elif device_type_mapped == "switch":
-            config["command_topic"] = f"homeassistant/{device_type_mapped}/{device_name}/{entity_id}/set"
-            mqtt_subscribe_topics.append(config["command_topic"])  # Add set topic to the array of topics to subscribe on.
-            config["payload_on"] = 1
-            config["payload_off"] = 0
-            config["icon"] = "mdi:electric-switch"
-        elif device_type_mapped == "sensor" and json_data["dev"] == "ai":
-            config["value_template"] = "{{ value_json.value }}"
-            config["min"] = json_data.get("modes", {}).get(active_mode, {}).get("range", [0, 100])[0]
-            config["max"] = json_data.get("modes", {}).get(active_mode, {}).get("range", [0, 100])[1]
-            config["unit_of_measurement"] = json_data.get("modes", {}).get(active_mode, {}).get("unit")
-            config["icon"] = "mdi:lightning-bolt-circle"
-        elif device_type_mapped == "sensor":
-            config["value_template"] = "{{ value_json.value }}"
-        elif device_type_mapped == "number":
-            config["min"] = json_data.get("modes", {}).get(active_mode, {}).get("range", [0, 100])[0]
-            config["max"] = json_data.get("modes", {}).get(active_mode, {}).get("range", [0, 100])[1]
-            config["unit_of_measurement"] = json_data.get("modes", {}).get(active_mode, {}).get("unit")
-            config["command_topic"] = f"homeassistant/{device_type_mapped}/{device_name}/{entity_id}/set"
-            mqtt_subscribe_topics.append(config["command_topic"])  # Add set topic to the array of topics to subscribe on. 
-            config["value_template"] = "{{ value_json.value }}"
-            config["icon"] = "mdi:lightning-bolt-circle"
-        elif device_type_mapped == "light":
-            config["command_topic"] = f"homeassistant/{device_type_mapped}/{device_name}/{entity_id}/set"
-            mqtt_subscribe_topics.append(config["command_topic"])  # Add set topic to the array of topics to subscribe on.
-            config["payload_on"] = 1
-            config["payload_off"] = 0
-            config["icon"] = "mdi:led-on"
-        # else:  # No need for an empty else block
+            # Update config based on device type
+            if device_type_mapped == "binary_sensor":
+                #config["value_template"] = "{{ value }}"
+                config["payload_on"] = 1
+                config["payload_off"] = 0
+                #if json_data['circuit'] == 1:
+                #    config["icon"] = "mdi:electric-switch-closed"
+                #else:
+                #    config["icon"] = "mdi:electric-switch"
+                config["icon"] = "mdi:electric-switch"
+            elif device_type_mapped == "switch":
+                config["command_topic"] = f"homeassistant/{device_type_mapped}/{device_name}/{entity_id}/set"
+                mqtt_subscribe_topics.append(config["command_topic"])  # Add set topic to the array of topics to subscribe on.
+                config["payload_on"] = 1
+                config["payload_off"] = 0
+                config["icon"] = "mdi:electric-switch"
+            elif device_type_mapped == "sensor" and json_data["dev"] == "ai":
+                config["value_template"] = "{{ value_json.value }}"
+                config["min"] = json_data.get("modes", {}).get(active_mode, {}).get("range", [0, 100])[0]
+                config["max"] = json_data.get("modes", {}).get(active_mode, {}).get("range", [0, 100])[1]
+                config["unit_of_measurement"] = json_data.get("modes", {}).get(active_mode, {}).get("unit")
+                config["icon"] = "mdi:lightning-bolt-circle"
+            elif device_type_mapped == "sensor":
+                config["value_template"] = "{{ value_json.value }}"
+            elif device_type_mapped == "number":
+                config["min"] = json_data.get("modes", {}).get(active_mode, {}).get("range", [0, 100])[0]
+                config["max"] = json_data.get("modes", {}).get(active_mode, {}).get("range", [0, 100])[1]
+                config["unit_of_measurement"] = json_data.get("modes", {}).get(active_mode, {}).get("unit")
+                config["command_topic"] = f"homeassistant/{device_type_mapped}/{device_name}/{entity_id}/set"
+                mqtt_subscribe_topics.append(config["command_topic"])  # Add set topic to the array of topics to subscribe on. 
+                config["value_template"] = "{{ value_json.value }}"
+                config["icon"] = "mdi:lightning-bolt-circle"
+            elif device_type_mapped == "light":
+                config["command_topic"] = f"homeassistant/{device_type_mapped}/{device_name}/{entity_id}/set"
+                mqtt_subscribe_topics.append(config["command_topic"])  # Add set topic to the array of topics to subscribe on.
+                config["payload_on"] = 1
+                config["payload_off"] = 0
+                config["icon"] = "mdi:led-on"
+            # else:  # No need for an empty else block
 
-        #Publish topics and payload with HASS auto config settings 
-        full_topic = generate_mqtt_topic(json_data.get('dev', 'unknown'), json_data.get('circuit', 'unknown'), "config")
-        payload = json.dumps(config)
-        websocket_to_mqtt_queue.put((full_topic, payload))
+            #Publish topics and payload with HASS auto config settings 
+            full_topic = generate_mqtt_topic(json_data.get('dev', 'unknown'), json_data.get('circuit', 'unknown'), "config")
+            payload = json.dumps(config)
+            websocket_to_mqtt_queue.put((full_topic, payload))
 
-        # Publish the state of the circuit at initial run (updates of state will be handled via websocket)
-        state_value = json_data.get("value")
-        if "value_template" in config and config["value_template"] == "{{ value_json.value }}":         # Publish based on schema
-            websocket_to_mqtt_queue.put((config["state_topic"], json.dumps({"value": state_value})))    # Publish as JSON with raw value
-        else:
-            websocket_to_mqtt_queue.put((config["state_topic"], state_value)) 
+            # Publish the state of the circuit at initial run (updates of state will be handled via websocket)
+            state_value = json_data.get("value")
+            if "value_template" in config and config["value_template"] == "{{ value_json.value }}":         # Publish based on schema
+                websocket_to_mqtt_queue.put((config["state_topic"], json.dumps({"value": state_value})))    # Publish as JSON with raw value
+            else:
+                websocket_to_mqtt_queue.put((config["state_topic"], state_value)) 
 
-    logging.debug(f"Unipi device type found that is not mapped to HA MQTT device type, skipping")
-    logging.debug(f"WebSocket subscribe topics {mqtt_subscribe_topics}")
+        logging.error(f"Unipi device type found that is not mapped to HA MQTT device type, skipping")
+        logging.debug(f"WebSocket subscribe topics {mqtt_subscribe_topics}")
+    except Exception as e:
+        logging.error(f"Error generating MQTT topic: {e}")
+        return None  # Handle errors gracefully
 
 # Function to handle discovery process
 @log_function
@@ -274,6 +285,35 @@ async def websocket_receive(websocket):
         except asyncio.CancelledError:
             logging.debug("WebSocket receive cancelled")
             break
+
+''' TODO MATTHIJS
+async def websocket_receive(websocket):
+    """Receives messages from WebSocket and processes them."""
+    while True:
+        try:
+            message = await websocket.recv()
+            logging.debug(f"Received WebSocket message: {message}")
+            try:
+                json_data = json.loads(message)
+                logging.debug(f"JSON_DATA: {json_data}")
+                # Check for required keys before further processing
+                required_keys = ['dev', 'circuit', 'value', 'cmd']  # Add other essential keys
+                if not all(key in json_data for key in required_keys):
+                    missing_keys = [key for key in required_keys if key not in json_data]
+                    logging.warning(f"Missing required keys in WebSocket message: {missing_keys}. Skipping message.")
+                    continue  # Skip processing this message and move to the next one
+                # If all required keys are present, proceed with processing
+                # ... (rest of your message processing logic)
+            except json.JSONDecodeError as e:
+                logging.error(f"Error decoding JSON data: {e}")
+        except websockets.exceptions.ConnectionClosedError as e:
+            logging.error(f"WebSocket connection closed: {e}")
+            break  # Exit the loop if the connection is closed
+        except Exception as e:
+            logging.exception(f"Unexpected error in websocket_receive: {e}")
+            break  # Exit the loop on unexpected errors
+'''
+
 
 #Function to convert incomming MQTT messages and publish on websocket. 
 @log_function
@@ -368,6 +408,7 @@ def websocket_worker_thread():
         asyncio.run(send_to_websocket(message))
         mqtt_to_websocket_queue.task_done()
 
+'''
 def mqtt_loop_thread():
     while True:  # Keep trying to reconnect
         try:
@@ -380,6 +421,24 @@ def mqtt_loop_thread():
         except Exception as e:
             logging.exception(f"Unexpected error in MQTT loop: {e}")
             break
+'''
+
+def mqtt_loop_thread():
+    reconnect_delay = 1  # Initial delay
+    while not should_stop.is_set():
+        try:
+            mqtt_client.reconnect()  # Attempt to reconnect
+            while not should_stop.is_set():
+                mqtt_client.loop(timeout=1.0)
+            reconnect_delay = 1  # Reset delay on successful connection
+        except (mqtt.WebsocketConnectionError, OSError) as e:
+            logging.error(f"MQTT connection error: {e}. Retrying in {reconnect_delay} seconds...")
+            time.sleep(reconnect_delay)
+            reconnect_delay = min(reconnect_delay * 2, 60)  # Exponential backoff with max delay of 60 seconds
+        except Exception as e:
+            logging.exception(f"Unexpected error in MQTT loop: {e}")
+            break
+
 
 # --- Main Thread ---
 if __name__ == "__main__":
