@@ -192,8 +192,13 @@ def json_to_mqtt_topics_discovery(mqtt_topic, json_data, device_info):
 
         logging.error(f"Unipi device type found that is not mapped to HA MQTT device type, skipping")
         logging.debug(f"WebSocket subscribe topics {mqtt_subscribe_topics}")
-    except Exception as e:
-        logging.error(f"Error generating MQTT topic: {e}")
+    except KeyError as e:
+        missing_key = str(e)  # Get the name of the missing key
+        logging.warning(f"Missing key in data: {missing_key}. Skipping message for device: {device_info.get('sn', 'unknown')}")
+    except TypeError as e:
+        logging.error(f"Invalid data type encountered: {e}. JSON data: {json_data}")
+    except Exception as e: 
+        logging.exception(f"An unexpected error occurred: {e}") # Log the full traceback
         return None  # Handle errors gracefully
 
 # Function to handle discovery process
@@ -243,6 +248,12 @@ def on_mqtt_message(client, userdata, message):
     # Put the original message in the queue for other processing if needed
     mqtt_to_websocket_queue.put(message_payload)
 
+def on_disconnect(client, userdata, rc):
+        if rc != 0:
+            logging.warning("Unexpected disconnection from MQTT. Reconnecting...")
+            client.reconnect()  # Attempt reconnection
+    
+    mqtt_client.on_disconnect = on_disconnect
 
 # --- WebSocket Client Setup ---
 @log_function
@@ -285,35 +296,6 @@ async def websocket_receive(websocket):
         except asyncio.CancelledError:
             logging.debug("WebSocket receive cancelled")
             break
-
-''' TODO MATTHIJS
-async def websocket_receive(websocket):
-    """Receives messages from WebSocket and processes them."""
-    while True:
-        try:
-            message = await websocket.recv()
-            logging.debug(f"Received WebSocket message: {message}")
-            try:
-                json_data = json.loads(message)
-                logging.debug(f"JSON_DATA: {json_data}")
-                # Check for required keys before further processing
-                required_keys = ['dev', 'circuit', 'value', 'cmd']  # Add other essential keys
-                if not all(key in json_data for key in required_keys):
-                    missing_keys = [key for key in required_keys if key not in json_data]
-                    logging.warning(f"Missing required keys in WebSocket message: {missing_keys}. Skipping message.")
-                    continue  # Skip processing this message and move to the next one
-                # If all required keys are present, proceed with processing
-                # ... (rest of your message processing logic)
-            except json.JSONDecodeError as e:
-                logging.error(f"Error decoding JSON data: {e}")
-        except websockets.exceptions.ConnectionClosedError as e:
-            logging.error(f"WebSocket connection closed: {e}")
-            break  # Exit the loop if the connection is closed
-        except Exception as e:
-            logging.exception(f"Unexpected error in websocket_receive: {e}")
-            break  # Exit the loop on unexpected errors
-'''
-
 
 #Function to convert incomming MQTT messages and publish on websocket. 
 @log_function
@@ -365,7 +347,6 @@ def mqtt_to_websocket_converter(mqtt_topic, message_payload):
         else:
             websocket_to_mqtt_queue.put((full_topic, state_value)) 
 
-
     except Exception as e:
         logging.error(f"Failed to convert MQTT message to WebSocket: {e}")
 
@@ -408,28 +389,16 @@ def websocket_worker_thread():
         asyncio.run(send_to_websocket(message))
         mqtt_to_websocket_queue.task_done()
 
-'''
-def mqtt_loop_thread():
-    while True:  # Keep trying to reconnect
-        try:
-            mqtt_client.reconnect()  # Attempt to reconnect
-    while not should_stop.is_set():
-                mqtt_client.loop(timeout=1.0)  # Use loop with timeout for better responsiveness
-        except (mqtt.WebsocketConnectionError, OSError) as e:
-            logging.error(f"MQTT connection error: {e}. Retrying in 5 seconds...")
-            time.sleep(5)  # Wait before retrying
-        except Exception as e:
-            logging.exception(f"Unexpected error in MQTT loop: {e}")
-            break
-'''
+import time
+import paho.mqtt.client as mqtt  # Assuming you're using paho-mqtt
 
 def mqtt_loop_thread():
     reconnect_delay = 1  # Initial delay
-    while not should_stop.is_set():
+    while not should_stop.is_set():  # Assuming you have a 'should_stop' event for stopping the thread
         try:
             mqtt_client.reconnect()  # Attempt to reconnect
             while not should_stop.is_set():
-                mqtt_client.loop(timeout=1.0)
+                mqtt_client.loop(timeout=1.0)  # Process MQTT messages
             reconnect_delay = 1  # Reset delay on successful connection
         except (mqtt.WebsocketConnectionError, OSError) as e:
             logging.error(f"MQTT connection error: {e}. Retrying in {reconnect_delay} seconds...")
@@ -437,7 +406,7 @@ def mqtt_loop_thread():
             reconnect_delay = min(reconnect_delay * 2, 60)  # Exponential backoff with max delay of 60 seconds
         except Exception as e:
             logging.exception(f"Unexpected error in MQTT loop: {e}")
-            break
+            break  # Exit the loop on unexpected errors
 
 
 # --- Main Thread ---
