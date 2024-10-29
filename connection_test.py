@@ -20,8 +20,7 @@ handler = logging.handlers.RotatingFileHandler(
 formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(threadName)s - %(message)s')
 handler.setFormatter(formatter)
 logger = logging.getLogger()  # Get the root logger
-logger.setLevel(log
-_level)
+logger.setLevel(log_level)
 logger.addHandler(handler)
 
 # Load configuration from JSON file
@@ -253,7 +252,7 @@ def on_disconnect(client, userdata, rc):
             logging.warning("Unexpected disconnection from MQTT. Reconnecting...")
             client.reconnect()  # Attempt reconnection
     
-    mqtt_client.on_disconnect = on_disconnect
+    
 
 # --- WebSocket Client Setup ---
 @log_function
@@ -416,6 +415,7 @@ if __name__ == "__main__":
     mqtt_client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
     mqtt_client.on_connect = on_mqtt_connect
     mqtt_client.on_message = on_mqtt_message
+    mqtt_client.on_disconnect = on_disconnect
 
     mqtt_to_websocket_queue = queue.Queue()
     websocket_to_mqtt_queue = queue.Queue()
