@@ -1,0 +1,11 @@
+# macOS system files
+.DS_Store
+
+# VS Code workspace settings
+unipi-local.code-workspace
+
+# Backup directory
+backup/
+
+# Configuration file (if it contains sensitive/local data)
+config.json
