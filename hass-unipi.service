@@ -1,0 +1,16 @@
+[Unit]
+Description=Hass Unipi MQTT Bridge Service
+After=network.target
+
+[Service]
+# Replace 'pi' with the actual user running the script if different
+User=pi
+# Set the working directory to the root of the cloned repository
+WorkingDirectory=/home/pi/unipi-homeassistant
+# Execute the script using the python from the virtual environment
+ExecStart=/home/pi/unipi-homeassistant/.venv/bin/python /home/pi/unipi-homeassistant/hass-unipi.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

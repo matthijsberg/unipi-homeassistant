@@ -86,7 +86,7 @@ The script requires a `config.json` file in the same directory. Create one with 
 *   Adjust the MQTT port if necessary.
 *   The `mqtt.topic` is used as a prefix for device topics (e.g., `unipi/DEVICE_NAME/...`).
 
-## Running the Script
+## Running the Script Manually
 
 1.  Ensure your virtual environment is activated (`source .venv/bin/activate`).
 2.  Make sure you are in the directory containing `hass-unipi.py` and `config.json`.
@@ -96,6 +96,91 @@ The script requires a `config.json` file in the same directory. Create one with 
     ```
 4.  The script will connect to the Unipi, perform discovery, connect to MQTT, and start relaying messages.
 5.  To stop the script gracefully, press `Ctrl+C`.
+
+## Deploying to a Raspberry Pi (or other remote machine) using Git
+
+Using Git is a convenient way to manage the script on a remote machine like a Raspberry Pi.
+
+1.  **SSH into your Raspberry Pi:**
+    ```bash
+    ssh pi@YOUR_RASPBERRY_PI_IP
+    ```
+
+2.  **Install Git (if not already installed):**
+    ```bash
+    sudo apt update
+    sudo apt install git -y
+    ```
+
+3.  **Clone the Repository:**
+    Choose a directory where you want to store the script (e.g., `/home/pi/unipi-homeassistant`).
+    ```bash
+    cd /home/pi # Or your preferred location
+    git clone https://github.com/matthijsberg/unipi-homeassistant.git
+    cd unipi-homeassistant
+    ```
+
+4.  **Follow Installation Steps (on the Pi):**
+    Now, follow steps 2-4 from the main [Installation](#installation) section *on your Raspberry Pi* within the cloned directory (`/home/pi/unipi-homeassistant` in this example):
+    *   Create and activate a Python virtual environment (`python3 -m venv .venv`, `source .venv/bin/activate`).
+    *   Install the required packages (`python -m pip install paho-mqtt websockets requests pydantic`).
+
+5.  **Create `config.json` (on the Pi):**
+    The `config.json` file is *not* stored in Git (due to `.gitignore`). You need to create it manually on the Raspberry Pi inside the `unipi-homeassistant` directory. Use the structure described in the [Configuration](#configuration) section, filling in the correct details for your Pi's environment (MQTT broker accessible from the Pi, Unipi IP accessible from the Pi).
+    ```bash
+    nano config.json
+    # Paste the JSON structure and edit your details, then save (Ctrl+X, then Y, then Enter)
+    ```
+
+6.  **Running as a Systemd Service (Recommended for Persistence):**
+    To ensure the script runs automatically on boot and restarts if it fails, set it up as a systemd service. A template service file (`hass-unipi.service`) is included in the repository.
+
+    a.  **Edit the Service File (if necessary):**
+        The provided `hass-unipi.service` assumes the script is located in `/home/pi/unipi-homeassistant` and run by the `pi` user. If your path or username is different, edit the file *before* copying it:
+        ```bash
+        nano hass-unipi.service
+        # Adjust User=, WorkingDirectory=, and ExecStart= paths if needed
+        # Save changes (Ctrl+X, then Y, then Enter)
+        ```
+
+    b.  **Copy the Service File:**
+        ```bash
+        sudo cp hass-unipi.service /etc/systemd/system/hass-unipi.service
+        ```
+
+    c.  **Reload Systemd, Enable and Start the Service:**
+        ```bash
+        sudo systemctl daemon-reload
+        sudo systemctl enable hass-unipi.service
+        sudo systemctl start hass-unipi.service
+        ```
+
+    d.  **Check Service Status:**
+        ```bash
+        sudo systemctl status hass-unipi.service
+        ```
+        You should see `Active: active (running)`. Press `q` to exit the status view.
+
+    e.  **View Logs:**
+        To see the script's output when run as a service:
+        ```bash
+        sudo journalctl -u hass-unipi.service -f
+        ```
+        Press `Ctrl+C` to stop following the logs.
+
+7.  **Updating the Script:**
+    When you make changes to the script on your development machine and push them to GitHub, you can easily update the script on the Raspberry Pi:
+    ```bash
+    cd /home/pi/unipi-homeassistant # Navigate to the script directory
+    git pull origin main           # Fetch and merge the latest changes
+
+    # If you updated hass-unipi.service, copy it again and reload systemd
+    # sudo cp hass-unipi.service /etc/systemd/system/hass-unipi.service
+    # sudo systemctl daemon-reload
+
+    # Restart the service to apply changes
+    sudo systemctl restart hass-unipi.service
+    ```
 
 ## Home Assistant Integration
 
@@ -131,9 +216,11 @@ This allows for more direct control or automation outside of Home Assistant's st
 *   The script logs detailed information, warnings, and errors to `~/.local/logs/connection_test.log`.
 *   The log file rotates automatically when it reaches 5MB, keeping up to 3 backup files.
 *   Check this log file for troubleshooting connection issues or unexpected behavior.
+*   When running as a systemd service, you can also view logs using `sudo journalctl -u hass-unipi.service`.
 
 ## Troubleshooting
 
-*   **Connection Errors:** Check the log file (`~/.local/logs/connection_test.log`) for details. Verify IP addresses, ports, usernames, and passwords in `config.json`. Ensure network connectivity between the script runner, the Unipi, and the MQTT broker.
+*   **Connection Errors:** Check the log file (`~/.local/logs/connection_test.log` or `journalctl -u hass-unipi.service`) for details. Verify IP addresses, ports, usernames, and passwords in `config.json`. Ensure network connectivity between the script runner, the Unipi, and the MQTT broker.
 *   **Devices Not Appearing in HA:** Verify the MQTT integration is set up correctly in Home Assistant. Check the Home Assistant logs and the script logs for MQTT connection errors or discovery message issues. Ensure the `device_name` derived from your Unipi model/SN is consistent.
 *   **Dependencies Missing:** The script checks for required libraries on startup. If it exits with an error message about missing libraries, ensure you have activated the virtual environment and run the `pip install` command again.
+*   **Service Fails to Start:** Check the service status (`sudo systemctl status hass-unipi.service`) and logs (`sudo journalctl -u hass-unipi.service`) for errors. Common issues include incorrect paths in the `.service` file, incorrect user permissions, or problems with the Python script itself (check `config.json`).
