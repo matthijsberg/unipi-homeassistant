@@ -4,7 +4,7 @@ This script bridges communication between a Unipi device (over Websocket) and an
 It handles device discovery for Home Assistant, message conversion between Websocket and MQTT,
 and graceful shutdown on Ctrl+C.
 
-Version 202503-01
+Version 202503-011
 """
 
 import threading
