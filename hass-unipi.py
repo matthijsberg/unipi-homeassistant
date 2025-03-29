@@ -764,6 +764,7 @@ def generate_mqtt_topic_discovery(dev: str, circuit: str, topic_end: str) -> str
         # Standard entity ID and topic structure for other devices
         entity_id = f"{dev}_{circuit}"
         return f"homeassistant/{device_type_mapped}/{device_name}/{entity_id}/{topic_end}"
+        return f"homeassistant/{device_type_mapped}/{device_name}/{entity_id}/{topic_end}"
 
 
 ###################################################
