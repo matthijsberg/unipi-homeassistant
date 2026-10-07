@@ -224,3 +224,17 @@ This allows for more direct control or automation outside of Home Assistant's st
 *   **Devices Not Appearing in HA:** Verify the MQTT integration is set up correctly in Home Assistant. Check the Home Assistant logs and the script logs for MQTT connection errors or discovery message issues. Ensure the `device_name` derived from your Unipi model/SN is consistent.
 *   **Dependencies Missing:** The script checks for required libraries on startup. If it exits with an error message about missing libraries, ensure you have activated the virtual environment and run the `pip install` command again.
 *   **Service Fails to Start:** Check the service status (`sudo systemctl status hass-unipi.service`) and logs (`sudo journalctl -u hass-unipi.service`) for errors. Common issues include incorrect paths in the `.service` file, incorrect user permissions, or problems with the Python script itself (check `config.json`).
+
+## Development safety (read before committing)
+
+This repository is public; the installation it controls is a real house. House-specific files
+(`config.json`, `local_rules.json`, logs, backups, traffic captures) are git-ignored and a PII/secret
+scanner blocks accidental commits. Enable the hooks once per clone:
+
+```bash
+git config core.hooksPath tools/git-hooks
+```
+
+`tools/pii_scan.py` runs on every commit and push. Use `config.example.json` as a template.
+The project plan and decision log live in `docs/knowledge/` (Open Knowledge Format).
+`legacy/` holds the redacted original script for reference only.

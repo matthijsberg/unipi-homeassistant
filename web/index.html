@@ -1,0 +1,1193 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Unipi Local Logic - Blockly</title>
+    <script src="https://unpkg.com/blockly/blockly.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            background-color: #f4f4f9;
+        }
+
+        #loginScreen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #ecf0f1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 2000;
+        }
+
+        .login-card {
+            background: white;
+            padding: 40px;
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+            width: 400px;
+            text-align: center;
+        }
+
+        .login-card h2 {
+            margin-top: 0;
+            color: #2c3e50;
+        }
+
+        .device-info-table {
+            width: 100%;
+            margin: 20px 0;
+            text-align: left;
+            border-collapse: collapse;
+        }
+
+        .device-info-table td {
+            padding: 8px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .device-info-table td:first-child {
+            font-weight: bold;
+            color: #7f8c8d;
+        }
+
+        .login-form {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .login-form input {
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+        .login-form button {
+            background: #2980b9;
+            color: white;
+            padding: 10px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1rem;
+        }
+
+        .login-form button:hover {
+            background: #3498db;
+        }
+
+        #app {
+            display: none;
+            flex-direction: column;
+            height: 100%;
+            width: 100%;
+        }
+
+        header {
+            background: #333;
+            color: white;
+            padding: 10px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 1.2rem;
+        }
+
+        #blocklyDiv {
+            flex-grow: 1;
+            width: 100%;
+        }
+
+        .controls {
+            display: flex;
+            gap: 10px;
+        }
+
+        button {
+            padding: 8px 15px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        .btn-save {
+            background: #2ecc71;
+            color: white;
+        }
+
+        .btn-reload {
+            background: #3498db;
+            color: white;
+        }
+
+        .status {
+            font-size: 0.9rem;
+            color: #ccc;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgba(0, 0, 0, 0.4);
+        }
+
+        .modal-content {
+            background-color: #fefefe;
+            margin: 10% auto;
+            padding: 20px;
+            border: 1px solid #888;
+            width: 50%;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .close:hover,
+        .close:focus {
+            color: black;
+            text-decoration: none;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+
+        th,
+        td {
+            text-align: left;
+            padding: 8px;
+            border-bottom: 1px solid #ddd;
+        }
+
+        /* Toggle Switch */
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 40px;
+            height: 20px;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 20px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 16px;
+            width: 16px;
+            left: 2px;
+            bottom: 2px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+
+        input:checked+.slider {
+            background-color: #2196F3;
+        }
+
+        input:checked+.slider:before {
+            transform: translateX(20px);
+        }
+
+        /* Live States Styles */
+        #liveStatesPanel {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+        .state-group-header {
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            margin: 12px 0 6px 0;
+            padding-bottom: 4px;
+            border-bottom: 1px dashed #e2e8f0;
+        }
+        .state-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 12px;
+            border-radius: 6px;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .state-item.updated {
+            animation: flashHighlight 1s ease-out;
+        }
+        .state-badge {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            background: #cbd5e1;
+            color: #475569;
+            padding: 2px 5px;
+            border-radius: 4px;
+            font-weight: 700;
+            margin-right: 6px;
+            font-family: monospace;
+        }
+        .state-val {
+            font-family: monospace;
+            font-weight: 700;
+            font-size: 0.85rem;
+            padding: 2px 6px;
+            border-radius: 12px;
+        }
+        .state-val.on {
+            background: #dcfce7;
+            color: #166534;
+        }
+        .state-val.off {
+            background: #f1f5f9;
+            color: #475569;
+        }
+        .state-val.analog {
+            background: #dbeafe;
+            color: #1e40af;
+        }
+        @keyframes flashHighlight {
+            0% { border-color: #3b82f6; background: #eff6ff; transform: scale(1.02); }
+            100% { border-color: #e2e8f0; background: #f8fafc; transform: scale(1); }
+        }
+        #liveIndicator {
+            animation: pulseIndicator 2s infinite;
+        }
+        @keyframes pulseIndicator {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(46, 204, 113, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(46, 204, 113, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(46, 204, 113, 0); }
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Login / Splash Screen -->
+    <div id="loginScreen">
+        <div class="login-card">
+            <h2>Unipi Logic Engine</h2>
+            <table class="device-info-table">
+                <tr>
+                    <td>Device</td>
+                    <td id="infoName">Loading...</td>
+                </tr>
+                <tr>
+                    <td>Model</td>
+                    <td id="infoModel">Loading...</td>
+                </tr>
+                <tr>
+                    <td>S/N</td>
+                    <td id="infoSN">Loading...</td>
+                </tr>
+                <tr>
+                    <td>IP Address</td>
+                    <td id="infoIP">Loading...</td>
+                </tr>
+            </table>
+
+            <div class="login-form">
+                <p id="loginError" style="color:red; display:none;"></p>
+                <p style="margin:0 0 10px 0; color:#666; font-size:0.9em;">Please use your system (Linux) username and
+                    password.</p>
+                <input type="text" id="loginUser" placeholder="Username">
+                <input type="password" id="loginPass" placeholder="Password">
+                <button onclick="doLogin()">Log In</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main App (Hidden by default) -->
+    <div id="app">
+        <header>
+            <div style="display: flex; align-items: center; gap: 20px;">
+                <h1>Unipi Local Logic</h1>
+                <span id="statusMsg" class="status"></span>
+            </div>
+            <div class="controls">
+                <span id="userInfo" style="margin-right: 15px; font-weight: bold; display: none;"></span>
+                <button id="btnLogout" style="background: #e74c3c; color: white; display: none;"
+                    onclick="doLogout()">Logout</button>
+                <button class="btn-reload" onclick="loadRules()">Reload Rules</button>
+                <button class="btn-save" onclick="saveRules()">Save Rules</button>
+                <button style="background: #e67e22; color: white;" onclick="openInputsModal()">Configure Inputs</button>
+            </div>
+        </header>
+
+        <!-- Inputs Modal -->
+        <div id="inputsModal" class="modal">
+            <div class="modal-content">
+                <span class="close" onclick="closeInputsModal()">&times;</span>
+                <h2>Configure Digital Inputs</h2>
+                <p style="font-size: 0.9em; color: #666;">
+                    Toggle "Inverted" to treat Normally Closed (NC) inputs as ON when 0 and OFF when 1.
+                    Changes are saved automatically.
+                </p>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Circuit</th>
+                            <th>Current Value</th>
+                            <th>Logic</th>
+                        </tr>
+                    </thead>
+                    <tbody id="inputsTableBody">
+                        <!-- Rows injected here -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Login Modal -->
+        <div id="loginModal" class="modal" style="display:none;">
+            <div class="modal-content" style="width: 300px; text-align: center;">
+                <h2>Login Required</h2>
+                <p id="loginError" style="color: red; display: none;"></p>
+                <div style="margin-bottom: 15px; text-align: left;">
+                    <label style="display:block; margin-bottom:5px;">Username</label>
+                    <input type="text" id="loginUser" style="width: 100%; padding: 8px; box-sizing: border-box;">
+                </div>
+                <div style="margin-bottom: 20px; text-align: left;">
+                    <label style="display:block; margin-bottom:5px;">Password</label>
+                    <input type="password" id="loginPass" style="width: 100%; padding: 8px; box-sizing: border-box;"
+                        onkeypress="if(event.key==='Enter') doLogin()">
+                </div>
+                <button class="btn-save" onclick="doLogin()" style="width: 100%;">Log In</button>
+            </div>
+        </div>
+
+        <div style="display: flex; flex-grow: 1; min-height: 0; width: 100%;">
+            <div id="blocklyDiv" style="flex-grow: 1; height: 100%;"></div>
+            <div id="liveStatesPanel" style="width: 280px; border-left: 1px solid #ddd; background: white; display: flex; flex-direction: column; overflow: hidden; box-shadow: -2px 0 5px rgba(0,0,0,0.05);">
+                <!-- Header -->
+                <div style="padding: 15px; border-bottom: 1px solid #eee; background: #fafafa; display: flex; justify-content: space-between; align-items: center;">
+                    <h3 style="margin: 0; font-size: 1rem; color: #2c3e50; font-weight: bold; letter-spacing: 0.5px;">Live Diagnostics</h3>
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                        <span style="font-size: 0.75em; color: #7f8c8d; font-weight: 600;">ACTIVE</span>
+                        <span id="liveIndicator" style="width: 8px; height: 8px; border-radius: 50%; background: #2ecc71; box-shadow: 0 0 0 0 rgba(46, 204, 113, 0.7);"></span>
+                    </div>
+                </div>
+                <!-- Content -->
+                <div id="liveStatesList" style="flex-grow: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+                    <div style="color: #95a5a6; text-align: center; padding-top: 30px; font-size: 0.9rem;">
+                        Waiting for data...
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            // --- Custom Blocks Definition ---
+
+            Blockly.Blocks['unipi_rule'] = {
+                init: function () {
+                    this.appendDummyInput()
+                        .appendField("Rule Name:")
+                        .appendField(new Blockly.FieldTextInput("My Rule"), "NAME");
+                    this.appendValueInput("TRIGGER")
+                        .setCheck("Trigger")
+                        .appendField("IF");
+                    this.appendStatementInput("CONDITIONS")
+                        .setCheck("Condition")
+                        .appendField("AND");
+                    this.appendValueInput("ACTION")
+                        .setCheck("Action")
+                        .appendField("THEN");
+                    this.setColour(230);
+                    this.setTooltip("Defines a logic rule.");
+                    this.setHelpUrl("");
+                }
+            };
+
+            Blockly.Blocks['unipi_trigger'] = {
+                init: function () {
+                    this.appendDummyInput()
+                        .appendField("Device")
+                        .appendField(new Blockly.FieldDropdown([
+                            ["Digital Input", "input"],
+                            ["Temperature", "temp"],
+                            ["Analog Input", "ai"]
+                        ]), "DEV");
+                    this.appendDummyInput()
+                        .appendField("Circuit")
+                        .appendField(new Blockly.FieldTextInput("1_01"), "CIRCUIT");
+                    this.appendDummyInput()
+                        .appendField("Operator")
+                        .appendField(new Blockly.FieldDropdown([
+                            ["==", "eq"],
+                            ["!=", "ne"],
+                            [">", "gt"],
+                            ["<", "lt"],
+                            [">=", "ge"],
+                            ["<=", "le"],
+                            ["ANY CHANGE", "any"]
+                        ]), "OP");
+                    this.appendDummyInput()
+                        .appendField("Value")
+                        .appendField(new Blockly.FieldTextInput("1"), "VALUE");
+                    this.setOutput(true, "Trigger");
+                    this.setColour(120);
+                    this.setTooltip("Trigger condition.");
+                }
+            };
+
+            Blockly.Blocks['unipi_condition'] = {
+                init: function () {
+                    this.appendDummyInput()
+                        .appendField("AND Device")
+                        .appendField(new Blockly.FieldDropdown([
+                            ["Digital Input", "input"],
+                            ["Relay", "relay"],
+                            ["Digital Output", "output"],
+                            ["Analog Input", "ai"],
+                            ["Analog Output", "analogoutput"],
+                            ["Temperature", "temp"],
+                            ["LED", "led"]
+                        ]), "DEV");
+                    this.appendDummyInput()
+                        .appendField("Circuit")
+                        .appendField(new Blockly.FieldTextInput("1_01"), "CIRCUIT");
+                    this.appendDummyInput()
+                        .appendField("Operator")
+                        .appendField(new Blockly.FieldDropdown([
+                            ["==", "eq"],
+                            ["!=", "ne"],
+                            [">", "gt"],
+                            ["<", "lt"],
+                            [">=", "ge"],
+                            ["<=", "le"]
+                        ]), "OP");
+                    this.appendDummyInput()
+                        .appendField("Value")
+                        .appendField(new Blockly.FieldTextInput("1"), "VALUE");
+                    this.setPreviousStatement(true, "Condition");
+                    this.setNextStatement(true, "Condition");
+                    this.setColour(180);
+                    this.setTooltip("Secondary condition that must also be met.");
+                }
+            };
+
+            Blockly.Blocks['unipi_action'] = {
+                init: function () {
+                    this.appendDummyInput()
+                        .appendField("Set Device")
+                        .appendField(new Blockly.FieldDropdown([
+                            ["Relay", "relay"],
+                            ["Digital Output", "output"],
+                            ["Analog Output", "analogoutput"],
+                            ["LED", "led"]
+                        ]), "DEV");
+                    this.appendDummyInput()
+                        .appendField("Circuit")
+                        .appendField(new Blockly.FieldTextInput("1_01"), "CIRCUIT");
+                    this.appendDummyInput()
+                        .appendField("To Value")
+                        .appendField(new Blockly.FieldTextInput("1"), "VALUE");
+                    this.appendDummyInput()
+                        .appendField("Transition (ms)")
+                        .appendField(new Blockly.FieldNumber(0, 0), "TRANSITION");
+                    this.appendDummyInput()
+                        .appendField("Delay (s)")
+                        .appendField(new Blockly.FieldNumber(0, 0), "DELAY");
+                    this.setOutput(true, "Action");
+                    this.setColour(20);
+                    this.setTooltip("Action to perform.");
+                }
+            };
+
+            Blockly.Blocks['unipi_action_dimmer'] = {
+                init: function () {
+                    this.appendDummyInput()
+                        .appendField("Dimmer Control (AO only)");
+                    this.appendDummyInput()
+                        .appendField("Circuit")
+                        .appendField(new Blockly.FieldTextInput("1_01"), "CIRCUIT");
+                    this.setOutput(true, "Action");
+                    this.setColour(20);
+                    this.setTooltip("Dimmer action (short press toggle, long press dim).");
+                }
+            };
+
+            // --- Workspace Initialization ---
+
+            const workspace = Blockly.inject('blocklyDiv', {
+                toolbox: {
+                    "kind": "flyoutToolbox",
+                    "contents": [
+                        { "kind": "block", "type": "unipi_rule" },
+                        { "kind": "block", "type": "unipi_trigger" },
+                        { "kind": "block", "type": "unipi_condition" },
+                        { "kind": "block", "type": "unipi_action" },
+                        { "kind": "block", "type": "unipi_action_dimmer" }
+                    ]
+                },
+                scrollbars: true,
+                trashcan: true
+            });
+
+            // --- Logic ---
+
+            const API_URL = '/api/rules';
+
+            function showStatus(msg, isError = false) {
+                const el = document.getElementById('statusMsg');
+                el.textContent = msg;
+                el.style.color = isError ? '#e74c3c' : '#2ecc71';
+                setTimeout(() => { el.textContent = ''; }, 3000);
+            }
+
+            async function saveRules() {
+                const rules = [];
+                const topBlocks = workspace.getTopBlocks(false); // Get all top-level blocks
+
+                for (const block of topBlocks) {
+                    if (block.type !== 'unipi_rule') continue;
+
+                    const name = block.getFieldValue('NAME');
+
+                    // Get Trigger
+                    const triggerBlock = block.getInputTargetBlock('TRIGGER');
+                    if (!triggerBlock) continue; // Skip incomplete rules
+
+                    const triggerDev = triggerBlock.getFieldValue('DEV');
+                    const triggerCircuit = triggerBlock.getFieldValue('CIRCUIT');
+                    const triggerOp = triggerBlock.getFieldValue('OP');
+                    const triggerValue = triggerBlock.getFieldValue('VALUE');
+
+                    // Get Conditions
+                    const conditions = [];
+                    let condBlock = block.getInputTargetBlock('CONDITIONS');
+                    while (condBlock) {
+                        if (condBlock.type === 'unipi_condition') {
+                            conditions.push({
+                                dev: condBlock.getFieldValue('DEV'),
+                                circuit: condBlock.getFieldValue('CIRCUIT'),
+                                operator: condBlock.getFieldValue('OP'),
+                                value: condBlock.getFieldValue('VALUE')
+                            });
+                        }
+                        condBlock = condBlock.getNextBlock();
+                    }
+
+                    // Get Action
+                    const actionBlock = block.getInputTargetBlock('ACTION');
+                    if (!actionBlock) continue; // Skip incomplete rules
+
+                    let actionType = "set";
+                    let actionDev = "";
+                    let actionCircuit = "";
+                    let actionValue = null;
+                    let actionTransition = 0;
+                    let actionDelay = 0;
+
+                    if (actionBlock.type === 'unipi_action') {
+                        actionDev = actionBlock.getFieldValue('DEV');
+                        actionCircuit = actionBlock.getFieldValue('CIRCUIT');
+                        actionValue = actionBlock.getFieldValue('VALUE');
+                        actionTransition = parseFloat(actionBlock.getFieldValue('TRANSITION')) || 0;
+                        actionDelay = parseFloat(actionBlock.getFieldValue('DELAY')) || 0;
+                    } else if (actionBlock.type === 'unipi_action_dimmer') {
+                        actionType = "dimmer";
+                        actionDev = "ao";
+                        actionCircuit = actionBlock.getFieldValue('CIRCUIT');
+                    }
+
+                    rules.push({
+                        name: name,
+                        trigger_dev: triggerDev,
+                        trigger_circuit: triggerCircuit,
+                        trigger_operator: triggerOp,
+                        trigger_value: triggerValue,
+                        conditions: conditions,
+                        action_type: actionType,
+                        action_dev: actionDev,
+                        action_circuit: actionCircuit,
+                        action_value: actionValue,
+                        action_transition: actionTransition,
+                        action_delay: actionDelay
+                    });
+                }
+
+                console.log("Saving rules:", rules);
+
+                try {
+                    // Use Bulk Update API
+                    const res = await fetch(API_URL, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(rules)
+                    });
+
+                    if (res.status === 401) {
+                        showLoginModal("Please log in to save rules.");
+                        return;
+                    }
+
+                    if (res.ok) {
+                        showStatus("Rules saved successfully!");
+                    } else {
+                        showStatus("Error saving rules.", true);
+                    }
+                } catch (e) {
+                    console.error(e);
+                    showStatus("Error saving rules.", true);
+                }
+            }
+
+            async function loadRules() {
+                workspace.clear();
+                try {
+                    const response = await fetch(API_URL);
+                    if (response.status === 401) {
+                        showLoginModal("Please log in to view rules.");
+                        return;
+                    }
+
+                    if (!response.ok) throw new Error("Failed to load");
+
+                    const rules = await response.json();
+
+                    let y = 20;
+                    for (const rule of rules) {
+                        // Create Rule Block
+                        const ruleBlock = workspace.newBlock('unipi_rule');
+                        ruleBlock.setFieldValue(rule.name, 'NAME');
+                        ruleBlock.initSvg();
+                        ruleBlock.render();
+                        ruleBlock.moveBy(20, y);
+
+                        // Create Trigger Block
+                        const triggerBlock = workspace.newBlock('unipi_trigger');
+                        triggerBlock.setFieldValue(rule.trigger_dev, 'DEV');
+                        triggerBlock.setFieldValue(rule.trigger_circuit, 'CIRCUIT');
+                        triggerBlock.setFieldValue(rule.trigger_operator || 'eq', 'OP');
+                        triggerBlock.setFieldValue(String(rule.trigger_value), 'VALUE');
+                        triggerBlock.initSvg();
+                        triggerBlock.render();
+
+                        // Connect Trigger
+                        ruleBlock.getInput('TRIGGER').connection.connect(triggerBlock.outputConnection);
+
+                        // Create and connect Conditions if any
+                        if (rule.conditions && rule.conditions.length > 0) {
+                            let lastCondBlock = null;
+                            for (let i = 0; i < rule.conditions.length; i++) {
+                                const cond = rule.conditions[i];
+                                const condBlock = workspace.newBlock('unipi_condition');
+                                condBlock.setFieldValue(cond.dev, 'DEV');
+                                condBlock.setFieldValue(cond.circuit, 'CIRCUIT');
+                                condBlock.setFieldValue(cond.operator || 'eq', 'OP');
+                                condBlock.setFieldValue(String(cond.value), 'VALUE');
+                                condBlock.initSvg();
+                                condBlock.render();
+                                
+                                if (i === 0) {
+                                    ruleBlock.getInput('CONDITIONS').connection.connect(condBlock.previousConnection);
+                                } else {
+                                    lastCondBlock.nextConnection.connect(condBlock.previousConnection);
+                                }
+                                lastCondBlock = condBlock;
+                            }
+                        }
+
+                        // Create Action Block
+                        let actionBlock;
+                        if (rule.action_type === 'dimmer') {
+                            actionBlock = workspace.newBlock('unipi_action_dimmer');
+                            actionBlock.setFieldValue(rule.action_circuit, 'CIRCUIT');
+                        } else {
+                            actionBlock = workspace.newBlock('unipi_action');
+                            actionBlock.setFieldValue(rule.action_dev, 'DEV');
+                            actionBlock.setFieldValue(rule.action_circuit, 'CIRCUIT');
+                            actionBlock.setFieldValue(String(rule.action_value), 'VALUE');
+                            actionBlock.setFieldValue(rule.action_transition || 0, 'TRANSITION');
+                            actionBlock.setFieldValue(rule.action_delay || 0, 'DELAY');
+                        }
+                        actionBlock.initSvg();
+                        actionBlock.render();
+
+                        // Connect Action
+                        ruleBlock.getInput('ACTION').connection.connect(actionBlock.outputConnection);
+
+                        y += 220; // Spacing (increased to accommodate conditions block stack)
+                    }
+                    showStatus("Rules loaded.");
+                } catch (e) {
+                    console.error(e);
+                    showStatus("Error loading rules.", true);
+                }
+            }
+
+            // Initial Load
+            loadRules();
+
+            // --- Inputs Modal Logic ---
+
+            const modal = document.getElementById("inputsModal");
+
+            function openInputsModal() {
+                modal.style.display = "block";
+                loadInputs();
+            }
+
+            function closeInputsModal() {
+                modal.style.display = "none";
+            }
+
+            window.onclick = function (event) {
+                if (event.target == modal) {
+                    closeInputsModal();
+                }
+            }
+
+            async function loadInputs() {
+                const tbody = document.getElementById('inputsTableBody');
+                tbody.innerHTML = '<tr><td colspan="3">Loading...</td></tr>';
+                try {
+                    const res = await fetch('/api/inputs');
+                    const inputs = await res.json();
+                    tbody.innerHTML = '';
+
+                    inputs.forEach(input => {
+                        const tr = document.createElement('tr');
+
+                        // Circuit
+                        const tdCircuit = document.createElement('td');
+                        tdCircuit.textContent = input.circuit;
+                        tr.appendChild(tdCircuit);
+
+                        // Value
+                        const tdVal = document.createElement('td');
+                        tdVal.textContent = input.value !== undefined ? input.value : '-';
+                        tr.appendChild(tdVal);
+
+                        // Toggle
+                        const tdToggle = document.createElement('td');
+                        const label = document.createElement('label');
+                        label.className = "switch";
+
+                        const checkbox = document.createElement('input');
+                        checkbox.type = "checkbox";
+                        checkbox.checked = input.inverted;
+                        checkbox.onchange = () => toggleInput(input.circuit, checkbox.checked);
+
+                        const span = document.createElement('span');
+                        span.className = "slider";
+
+                        label.appendChild(checkbox);
+                        label.appendChild(span);
+
+                        // Add text "NC" if checked, "NO" if unchecked?
+                        // Maybe just "Inverted"
+                        tdToggle.appendChild(label);
+
+                        const logicText = document.createElement('span');
+                        logicText.style.marginLeft = "10px";
+                        logicText.style.fontSize = "0.9em";
+                        logicText.textContent = input.inverted ? "Inverted (NC)" : "Normal (NO)";
+                        tdToggle.appendChild(logicText);
+
+                        tr.appendChild(tdToggle);
+                        tbody.appendChild(tr);
+                    });
+                } catch (e) {
+                    console.error(e);
+                    tbody.innerHTML = '<tr><td colspan="3" style="color:red">Error loading inputs</td></tr>';
+                }
+            }
+
+            async function toggleInput(circuit, isInverted) {
+                try {
+                    const res = await fetch(`/api/inputs/${circuit}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ inverted: isInverted })
+                    });
+
+                    if (res.status === 401) {
+                        showLoginModal("Session expired. Please log in.");
+                        return;
+                    }
+
+                    if (res.ok) {
+                        showStatus(`Input ${circuit} updated.`);
+                        loadInputs(); // Refresh to update text/state
+                    } else {
+                        const err = await res.json();
+                        alert("Error: " + (err.error || "Unknown"));
+                        loadInputs(); // Revert UI
+                    }
+                } catch (e) {
+                    console.error(e);
+                    alert("Network error");
+                }
+            }
+
+            // --- Auth Logic ---
+
+            const loginModal = document.getElementById("loginModal");
+
+            async function checkAuth() {
+                try {
+                    const res = await fetch('/api/auth_check');
+                    const data = await res.json();
+                    if (data.authenticated) {
+                        showApp(data.username);
+                    } else {
+                        showLogin();
+                    }
+                } catch (e) {
+                    console.error("Auth check failed", e);
+                    showLogin();
+                }
+            }
+
+            function showApp(username) {
+                document.getElementById("loginScreen").style.display = "none";
+                document.getElementById("app").style.display = "flex";
+
+                document.getElementById("userInfo").textContent = `User: ${username}`;
+                document.getElementById("userInfo").style.display = "inline";
+                document.getElementById("btnLogout").style.display = "inline";
+                // Hide old modal if open
+                if (loginModal) loginModal.style.display = "none";
+
+                // Fix Blockly rendering (it needs to know it is visible)
+                setTimeout(() => {
+                    Blockly.svgResize(workspace);
+                }, 100);
+            }
+
+            function showLogin() {
+                document.getElementById("loginScreen").style.display = "flex";
+                document.getElementById("app").style.display = "none";
+                fetchDeviceInfo();
+            }
+
+            async function fetchDeviceInfo() {
+                try {
+                    const res = await fetch('/api/info');
+                    if (res.ok) {
+                        const info = await res.json();
+                        document.getElementById("infoName").textContent = info.name || "Unknown";
+                        document.getElementById("infoModel").textContent = info.model || "Unknown";
+                        document.getElementById("infoSN").textContent = info.sn || "Unknown";
+                        document.getElementById("infoIP").textContent = info.ip || "Unknown";
+                    }
+                } catch (e) {
+                    console.error("Info fetch failed", e);
+                }
+            }
+
+            // Replaces updateUserUI
+            function updateUserUI(username) {
+                showApp(username);
+            }
+
+            async function doLogin() {
+                const user = document.getElementById("loginUser").value;
+                const pass = document.getElementById("loginPass").value;
+                const errElem = document.getElementById("loginError");
+
+                if (!user || !pass) {
+                    errElem.textContent = "Please enter username and password.";
+                    errElem.style.display = "block";
+                    return;
+                }
+
+                try {
+                    const res = await fetch('/api/login', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ username: user, password: pass })
+                    });
+
+                    if (res.ok) {
+                        const data = await res.json();
+                        updateUserUI(data.username);
+                        errElem.style.display = "none";
+                        document.getElementById("loginPass").value = "";
+                        loadRules(); // Reload data
+                    } else {
+                        errElem.textContent = "Login failed. Check credentials.";
+                        errElem.style.display = "block";
+                    }
+                } catch (e) {
+                    console.error(e);
+                    errElem.textContent = "Network error.";
+                    errElem.style.display = "block";
+                }
+            }
+
+            async function doLogout() {
+                await fetch('/api/logout', { method: 'POST' });
+                window.location.reload();
+            }
+
+            // Check auth on load
+            checkAuth();
+
+            // --- Live State Polling & Workspace Diagnostics ---
+            let previousStates = {};
+
+            async function pollLiveStates() {
+                // Only poll if app is visible (authenticated)
+                if (document.getElementById("app").style.display === "none") {
+                    return;
+                }
+                
+                try {
+                    const res = await fetch('/api/status');
+                    if (!res.ok) return;
+                    const states = await res.json();
+                    
+                    updateLiveStatesUI(states);
+                    highlightSatisfiedBlockTriggers(states);
+                    
+                    previousStates = states;
+                } catch (e) {
+                    console.error("Live state poll error:", e);
+                }
+            }
+
+            function updateLiveStatesUI(states) {
+                const listContainer = document.getElementById('liveStatesList');
+                if (!listContainer) return;
+                
+                // Group states by device type: input, relay, temp, etc.
+                const groups = {
+                    'Inputs': [],
+                    'Outputs & Relays': [],
+                    'Analog': [],
+                    '1-Wire Sensors': [],
+                    'Other': []
+                };
+                
+                for (const key in states) {
+                    const val = states[key];
+                    let dev = 'unknown';
+                    let circuit = 'unknown';
+                    
+                    // Split the key (which is dev_circuit or 1wdevice_circuit_dev)
+                    if (key.startsWith('1wdevice_')) {
+                        const parts = key.split('_');
+                        dev = parts[0] + ' ' + parts[2];
+                        circuit = parts[1];
+                        groups['1-Wire Sensors'].push({ key, dev, circuit, val });
+                        continue;
+                    }
+                    
+                    const underIdx = key.indexOf('_');
+                    if (underIdx !== -1) {
+                        dev = key.substring(0, underIdx);
+                        circuit = key.substring(underIdx + 1);
+                    } else {
+                        dev = key;
+                    }
+                    
+                    if (dev === 'input' || dev === 'di') {
+                        groups['Inputs'].push({ key, dev: 'input', circuit, val });
+                    } else if (dev === 'relay' || dev === 'ro' || dev === 'output' || dev === 'do' || dev === 'led') {
+                        groups['Outputs & Relays'].push({ key, dev, circuit, val });
+                    } else if (dev === 'ai' || dev === 'ao' || dev === 'analogoutput') {
+                        groups['Analog'].push({ key, dev, circuit, val });
+                    } else if (dev === 'temp' || dev === 'humidity') {
+                        groups['1-Wire Sensors'].push({ key, dev, circuit, val });
+                    } else {
+                        groups['Other'].push({ key, dev, circuit, val });
+                    }
+                }
+                
+                // Construct HTML content
+                let html = '';
+                
+                for (const groupName in groups) {
+                    const items = groups[groupName];
+                    if (items.length === 0) continue;
+                    
+                    // Sort items by circuit
+                    items.sort((a, b) => String(a.circuit).localeCompare(String(b.circuit)));
+                    
+                    html += `<div class="state-group-header">${groupName}</div>`;
+                    
+                    items.forEach(item => {
+                        const isUpdated = previousStates[item.key] !== undefined && previousStates[item.key] !== item.val;
+                        const updateClass = isUpdated ? 'updated' : '';
+                        
+                        let valClass = '';
+                        let valText = String(item.val);
+                        
+                        if (item.val === 1 || String(item.val).toUpperCase() === 'ON') {
+                            valClass = 'on';
+                            valText = 'ON';
+                        } else if (item.val === 0 || String(item.val).toUpperCase() === 'OFF') {
+                            valClass = 'off';
+                            valText = 'OFF';
+                        } else {
+                            valClass = 'analog';
+                            // Format number to 2 decimal places if it's float-like
+                            const floatVal = parseFloat(item.val);
+                            if (!isNaN(floatVal)) {
+                                valText = floatVal.toFixed(2);
+                                if (groupName === 'Analog') valText += ' V';
+                                else if (item.dev.includes('temp')) valText += ' °C';
+                            }
+                        }
+                        
+                        html += `
+                            <div class="state-item ${updateClass}" data-key="${item.key}">
+                                <div>
+                                    <span class="state-badge">${item.dev}</span>
+                                    <span style="font-weight: 600; color: #334155; font-family: monospace;">${item.circuit}</span>
+                                </div>
+                                <span class="state-val ${valClass}">${valText}</span>
+                            </div>
+                        `;
+                    });
+                }
+                
+                listContainer.innerHTML = html || `<div style="color: #95a5a6; text-align: center; padding-top: 30px; font-size: 0.9rem;">No active devices.</div>`;
+            }
+
+            function highlightSatisfiedBlockTriggers(states) {
+                const blocks = workspace.getAllBlocks(false);
+                blocks.forEach(block => {
+                    if (block.type === 'unipi_trigger') {
+                        const dev = block.getFieldValue('DEV');
+                        const circuit = block.getFieldValue('CIRCUIT');
+                        const op = block.getFieldValue('OP');
+                        const expected = block.getFieldValue('VALUE');
+                        
+                        const isSatisfied = evaluateTriggerInJS(dev, circuit, op, expected, states);
+                        
+                        if (isSatisfied) {
+                            block.setCommentText(`✅ Condition MET`);
+                            if (block.svgGroup_) {
+                                block.svgGroup_.classList.add('blocklySelected');
+                            }
+                        } else {
+                            block.setCommentText(null);
+                            if (block.svgGroup_) {
+                                block.svgGroup_.classList.remove('blocklySelected');
+                            }
+                        }
+                    } else if (block.type === 'unipi_condition') {
+                        const dev = block.getFieldValue('DEV');
+                        const circuit = block.getFieldValue('CIRCUIT');
+                        const op = block.getFieldValue('OP');
+                        const expected = block.getFieldValue('VALUE');
+                        
+                        const isSatisfied = evaluateTriggerInJS(dev, circuit, op, expected, states);
+                        
+                        if (isSatisfied) {
+                            block.setCommentText(`✅ Condition MET`);
+                            if (block.svgGroup_) {
+                                block.svgGroup_.classList.add('blocklySelected');
+                            }
+                        } else {
+                            block.setCommentText(null);
+                            if (block.svgGroup_) {
+                                block.svgGroup_.classList.remove('blocklySelected');
+                            }
+                        }
+                    }
+                });
+            }
+
+            function evaluateTriggerInJS(dev, circuit, op, expectedVal, states) {
+                let key = `${dev}_${circuit}`;
+                let val = states[key];
+                if (val === undefined) {
+                    if (dev === 'input') val = states[`di_${circuit}`];
+                    else if (dev === 'temp') val = states[`1wdevice_${circuit}_temp`];
+                }
+                if (val === undefined) return false;
+                
+                let actual = val;
+                let expected = expectedVal;
+                
+                // Try converting to numbers
+                const actualFloat = parseFloat(actual);
+                const expectedFloat = parseFloat(expected);
+                if (!isNaN(actualFloat) && !isNaN(expectedFloat)) {
+                    actual = actualFloat;
+                    expected = expectedFloat;
+                } else {
+                    actual = String(actual);
+                    expected = String(expected);
+                }
+                
+                switch (op) {
+                    case 'eq': 
+                        if (typeof actual === 'number' && typeof expected === 'number') {
+                            return Math.abs(actual - expected) < 0.01;
+                        }
+                        return String(actual).toUpperCase() === String(expected).toUpperCase();
+                    case 'ne': 
+                        if (typeof actual === 'number' && typeof expected === 'number') {
+                            return Math.abs(actual - expected) >= 0.01;
+                        }
+                        return String(actual).toUpperCase() !== String(expected).toUpperCase();
+                    case 'gt': return actual > expected;
+                    case 'lt': return actual < expected;
+                    case 'ge': return actual >= expected;
+                    case 'le': return actual <= expected;
+                    case 'any': return true;
+                    default: return false;
+                }
+            }
+
+            // Start polling loop every 1 second
+            setInterval(pollLiveStates, 1000);
+        </script>
+    </div> <!-- End of #app -->
+</body>
+
+</html>

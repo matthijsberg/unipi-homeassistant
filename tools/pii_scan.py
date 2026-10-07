@@ -51,6 +51,8 @@ PATTERNS = [
 # 1-wire / serial style identifiers are house-specific but not secret; not flagged.
 PII_OK = re.compile(r"(?:#|//|;|<!--)\s*pii-ok\b[^\n]*$")  # only as a trailing comment marker
 DENY_STOPLIST = {"none", "null", "true", "false", "unipi", "unipi1", "localhost", "admin"}
+# Non-identifying addresses (routing probe targets, documentation ranges).
+SAFE_IPS = {"10.255.255.255"}
 VERSION_CONTEXT = re.compile(r"(?i)\b(evok|version|ver|sw|v)\s*[:=]?\s*$")
 SAFE_VALUE = re.compile(r"<[^>]+>|example\.|your_|changeme|\*{3}")
 
@@ -128,6 +130,8 @@ def scan_line(path, lineno, text, deny):
     for name, rx in PATTERNS:
         for m in rx.finditer(text):
             if SAFE_VALUE.search(m.group(0)):
+                continue
+            if name == "ipv4" and m.group(0) in SAFE_IPS:
                 continue
             if name == "ipv4" and VERSION_CONTEXT.search(text[: m.start()]):
                 continue  # "evok 3.0.6.1", "version: 1.2.3.4" are versions, not addresses
