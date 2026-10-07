@@ -69,6 +69,14 @@ Subscribe with `bridge.events.subscribe(kind, callback)`; callbacks take keyword
 Digital-input values are logical from the WS edge on: `device_states`, rules and `input_changed.value`;
 `raw` carries the physical value.
 
+# sequencer (T12)
+
+`unipi_core/sequencer.py` `OutputSequencer` (`bridge.sequencer`): `start/cancel/cancel_all`, `failsafe_all`,
+`note_state` + `watchdog_tick`, injectable clock/sleep. `parse_command()` turns the MQTT JSON into
+`Pulse`/`Timed` (rejects, never clamps). Bridge: `process_output_json`, `_ws_write_now` (direct write),
+`_publish_attributes`, `_sequencer_watchdog`, `_shutdown_outputs`. Circuit options live in `circuits.py`
+(`failsafe_off, max_on_s, pulse_defaults, max_count, max_pulse_ms, presets`; digital outputs only).
+
 # Tooling (T03)
 
 `tools/{backup.sh,deploy.sh,rollback.sh,healthcheck.py}` — see `tools/README.md`. Deploy = preflight → backup →

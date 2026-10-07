@@ -21,7 +21,7 @@ Milestone **v2.1.0** = T03 + T04 merged (runtime code identical to v2.0.0, **rel
 * [T10 EventBus + CommandService (refactor)](T10-core-events-commands.md) - medium · deps: T04 · **done (shipped in rc1; soak continues on later rcs)**
 * [T07 Bring the S103 OS up to date + re-verify](T07-s103-os-currency.md) - 🔒 · medium · deps: T03 · todo (window needed)
 * [T11 Per-circuit config, names, logical inversion](T11-circuit-config.md) - medium · deps: T10 · **done 2026-10-07 (rc2 live, soaking)**
-* [T12 Output sequencer: pulse / duration / safety](T12-output-sequencer.md) - **high** · deps: T11 · todo
+* [T12 Output sequencer: pulse / duration / safety](T12-output-sequencer.md) - **high** · deps: T11 · **done 2026-10-07 (rc5 live, 154 tests; 2 bugs found+fixed on hardware; soak running)**
 * [T13 Presets as HA buttons](T13-ha-presets-buttons.md) - low · deps: T12 · todo
 * [T14 PIR hold (off-delay)](T14-input-hold-off-delay.md) - medium · deps: T11 · todo
 * [T15 Counter inputs](T15-counter-inputs.md) - low · deps: T11 · todo

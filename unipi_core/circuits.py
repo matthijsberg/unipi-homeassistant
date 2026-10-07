@@ -13,7 +13,9 @@ import logging
 import re
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from unipi_core.sequencer import Limits, SequenceRejected, make_pulse, make_timed
 
 DEV_ALIASES = {"input": "di", "relay": "ro", "output": "do", "analogoutput": "ao"}
 KNOWN_DEVS = {"di", "do", "ro", "led", "ai", "ao", "temp", "1wdevice"}
@@ -29,11 +31,44 @@ BINARY_SENSOR_CLASSES = {
 }
 
 PLANNED_KEYS = {
-    "off_delay_s": "T14", "counter": "T15", "counter_interval_s": "T15", "failsafe_off": "T12",
-    "max_on_s": "T12", "pulse_defaults": "T12", "max_count": "T12", "max_pulse_ms": "T12",
-    "presets": "T12/T13", "unit": "T16", "transform": "T16", "sampling": "T16", "valid_range": "T16",
-    "reject_values": "T16", "ha_component": "T19",
+    "off_delay_s": "T14", "counter": "T15", "counter_interval_s": "T15", "unit": "T16",
+    "transform": "T16", "sampling": "T16", "valid_range": "T16", "reject_values": "T16",
+    "ha_component": "T19",
 }
+OUTPUT_DEVS = {"do", "ro", "led"}  # digital outputs: the only devices the sequencer drives
+SEQUENCER_KEYS = {"failsafe_off", "max_on_s", "pulse_defaults", "max_count", "max_pulse_ms", "presets"}
+
+
+class PulseDefaults(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    on_ms: int | None = None
+    off_ms: int | None = None
+
+
+class PulseSpecModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    count: int
+    on_ms: int | None = None
+    off_ms: int | None = None
+
+
+class TimedSpecModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    state: str
+    duration_s: float
+
+
+class Preset(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    label: str | None = None
+    pulse: PulseSpecModel | None = None
+    timed: TimedSpecModel | None = None
+
+    @model_validator(mode="after")
+    def _exactly_one(self):
+        if (self.pulse is None) == (self.timed is None):
+            raise ValueError("a preset needs exactly one of 'pulse' or 'timed'")
+        return self
 
 
 class CircuitConfig(BaseModel):
@@ -42,6 +77,46 @@ class CircuitConfig(BaseModel):
     name: str | None = None
     device_class: str | None = None
     inverted: bool | None = None  # None = not set here (legacy "inputs" section may still apply)
+    # --- output sequencer (T12); digital outputs only ---
+    failsafe_off: bool = False                 # drive OFF after start-up / WS reconnect / shutdown
+    max_on_s: float | None = Field(default=None, gt=0)       # watchdog + upper bound for duration_s
+    pulse_defaults: PulseDefaults | None = None
+    max_count: int | None = Field(default=None, ge=1, le=100)
+    max_pulse_ms: int | None = Field(default=None, ge=20, le=60000)
+    presets: dict[str, Preset] = Field(default_factory=dict)
+
+    def sequencer_enabled(self) -> bool:
+        return bool(self.failsafe_off or self.max_on_s or self.pulse_defaults or self.max_count
+                    or self.max_pulse_ms or self.presets)
+
+    def limits(self) -> Limits:
+        d = self.pulse_defaults
+        return Limits(
+            max_count=self.max_count or Limits.max_count,
+            max_pulse_ms=self.max_pulse_ms or Limits.max_pulse_ms,
+            max_on_s=self.max_on_s or Limits.max_on_s,
+            on_ms=(d.on_ms if d and d.on_ms else Limits.on_ms),
+            off_ms=(d.off_ms if d and d.off_ms else Limits.off_ms),
+            failsafe_off=self.failsafe_off,
+            watchdog=self.max_on_s is not None,
+        )
+
+    @model_validator(mode="after")
+    def _validate_sequencer_settings(self):
+        """Fail at start-up, not when somebody presses the doorbell: defaults and presets must fit the limits."""
+        lim = self.limits()
+        try:
+            make_pulse(1, lim.on_ms, lim.off_ms, lim)
+            for name, pr in self.presets.items():
+                if not re.fullmatch(r"[a-z0-9_]+", name):
+                    raise SequenceRejected(f"preset name '{name}' must match [a-z0-9_]+")
+                if pr.pulse:
+                    make_pulse(pr.pulse.count, pr.pulse.on_ms, pr.pulse.off_ms, lim)
+                else:
+                    make_timed(pr.timed.state, pr.timed.duration_s, lim)
+        except SequenceRejected as e:
+            raise ValueError(f"invalid sequencer settings: {e}") from None
+        return self
 
     @model_validator(mode="before")
     @classmethod
@@ -90,6 +165,9 @@ def canonicalize_circuits(raw: Any) -> Any:
                 raise ValueError(f"circuit '{ck}': 'inverted' only applies to digital inputs (di)")
             if "device_class" in v and dev in ("led", "ao", "1wdevice"):
                 raise ValueError(f"circuit '{ck}': 'device_class' is not supported for {dev} entities")
+            used = SEQUENCER_KEYS & set(v)
+            if used and dev not in OUTPUT_DEVS:
+                raise ValueError(f"circuit '{ck}': {sorted(used)} only apply to digital outputs (do/ro/led)")
         out[ck] = v
     return out
 
@@ -114,6 +192,18 @@ class CircuitRegistry:
 
     def name(self, dev: str, circuit: str, default: str, subkey: str | None = None) -> str:
         return self.get(dev, circuit, subkey).name or default
+
+    def limits(self, dev: str, circuit: str) -> Limits:
+        return self.get(dev, circuit).limits()
+
+    def failsafe_keys(self) -> list[tuple[str, str]]:
+        """(dev, circuit) of every output configured with failsafe_off."""
+        out = []
+        for key, cfg in self._config.circuits.items():
+            parts = key.split("/")
+            if cfg.failsafe_off and parts[0] in OUTPUT_DEVS and len(parts) == 2:
+                out.append((parts[0], parts[1]))
+        return out
 
     def is_inverted(self, dev: str, circuit: str) -> bool:
         """Logical inversion applies to digital inputs only."""

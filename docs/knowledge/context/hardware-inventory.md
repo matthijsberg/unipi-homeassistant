@@ -76,6 +76,12 @@ SSH on; default user `unipi` with a publicly documented password (change it); SD
 Reference (S103, working): Unipi apt repo + `unipi-os-configurator`, kernel/firmware packages,
 `evok` 3.0.6.1, `/etc/evok/config.yaml` for the xS51 on RS485. Exact image filename/sha256: _TBD (T06)_.
 
+# Measured behaviour of the S103 (T12, 2026-10-07)
+
+- Front-panel `led` outputs: evok does not announce changes over the WebSocket; REST `value` lags a write by ~2–5 s. Do not use them to verify timing.
+- Boot after the Debian update that replaced the Raspberry Pi GPU firmware (1.20260915): clean; kernel stays the Unipi `6.6.31-v8`.
+- 1-wire sensor `…0063` (DS2438) disappeared from evok after the reboot (earlier flagged `lost`, humidity −17 %): likely sensor/wiring; its HA entities remain retained.
+
 # Unknowns (resolve in the named task)
 
 - Exact Unipi OS / evok version on L513 → **T30/T31** (no login before the upgrade); storage medium = removable µSD per Matthijs, confirm physically → **T30**.

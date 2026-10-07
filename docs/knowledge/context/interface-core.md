@@ -30,7 +30,7 @@ v2.0.0 (= live `2026092501`).
 Retained `/set` messages are ignored (on first connect and always), so HA's `retain: true`
 switch commands never replay physical actions.
 
-# 2. Output sequences — pulse & duration **[NEW T12/T13]**
+# 2. Output sequences — pulse & duration **[IMPLEMENTED T12; buttons T13]**
 
 One command message, on the **existing** command topic of any digital output
 (`do`, `ro`, `led`; also `relay`/`output` aliases):
@@ -67,7 +67,8 @@ Rules (normative):
 7. **Acks.** `state` → `ON` when the sequence starts, `OFF` when it ends or is cancelled.
    `attributes` → `{"busy": true, "remaining": n, "ends_at": iso}` while running,
    `{"busy": false}` after. 
-8. Timing is scheduled on the asyncio loop with `time.monotonic()` and written straight to
+8. Hard-crash exposure (measured, S103): after a SIGKILL an energised output stays on for the systemd restart delay + ≈3 s (13.5 s with `RestartSec=10`); the bridge sends the fail-safe OFF <0.1 s after it starts, the moment the WebSocket opens.
+9. Timing is scheduled on the asyncio loop with `time.monotonic()` and written straight to
    the WebSocket (not via the 30 s hold queue). Target jitter < 30 ms on a Pi 3B+.
 
 HA usage (automation/script):
