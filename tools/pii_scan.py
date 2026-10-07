@@ -34,7 +34,7 @@ FORBIDDEN_FILES = [
     "config.json", "config.*.json", "local_rules.json", "local_rules_state.json",
     "legacy_map.json", ".device_name", ".discovered_presets",
     "traffic_log*", "*.log", "*.bak*", "*.pem", "*.key", "id_*", ".env", ".env.*",
-    "hosts.yml",
+    "hosts.yml", "*.site.tgz", "site-*.tgz",
 ]
 FORBIDDEN_ALLOW = ["config.example.json", "*.example.json", "*.example"]
 
@@ -53,7 +53,7 @@ PII_OK = re.compile(r"(?:#|//|;|<!--)\s*pii-ok\b[^\n]*$")  # only as a trailing 
 DENY_STOPLIST = {"none", "null", "true", "false", "unipi", "unipi1", "localhost", "admin"}
 # Non-identifying addresses (routing probe targets, documentation ranges).
 SAFE_IPS = {"10.255.255.255"}
-VERSION_CONTEXT = re.compile(r"(?i)\b(evok|version|ver|sw|v)\s*[:=]?\s*$")
+VERSION_CONTEXT = re.compile(r"""(?i)\b(evok|version|ver|sw|v)[`'"*]*\s*[:=]?\s*$""")
 SAFE_VALUE = re.compile(r"<[^>]+>|example\.|your_|changeme|\*{3}")
 
 

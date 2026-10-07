@@ -68,6 +68,14 @@ The 7 front-panel **`led`** circuits are the safe test outputs for pulse/sequenc
 - The L513 rollback is a **swap SD card** (old card kept untouched) — the L513 itself is
   never backed up over the network. To be physically confirmed before T30.
 
+# Unipi BaseOS (planned for the new L513 card; see ADR-006)
+
+From search results/Evok docs, to be re-verified against the downloaded image (T06/T30): Debian 12
+bookworm arm64; Evok **not** included (install from `repo.unipi.technology`); first boot needs DHCP;
+SSH on; default user `unipi` with a publicly documented password (change it); SD ≥ 2 GB.
+Reference (S103, working): Unipi apt repo + `unipi-os-configurator`, kernel/firmware packages,
+`evok` 3.0.6.1, `/etc/evok/config.yaml` for the xS51 on RS485. Exact image filename/sha256: _TBD (T06)_.
+
 # Unknowns (resolve in the named task)
 
 - Exact Unipi OS / evok version on L513 → **T30/T31** (no login before the upgrade); storage medium = removable µSD per Matthijs, confirm physically → **T30**.

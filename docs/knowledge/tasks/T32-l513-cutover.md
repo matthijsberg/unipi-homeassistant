@@ -66,6 +66,11 @@ Card swap (old system resumes with old YAML; retained legacy states may be brief
 Evidence walk; `/log.md`; tag `v2.4.0` (release notes: L513 live) — tag points at the same
 code as v2.3.0 + any config-tool fixes.
 
+# Amendment 2026-10-07 ([ADR-006](/decisions/ADR-006-baseos-deployment.md))
+- "Install per runbook" = `tools/bootstrap.sh --site <l513 bundle> --tag v2.3.0` (+ `legacy.enabled: true`
+  in the site config). Deploys afterwards use `tools/deploy.sh` in release mode (symlink flip,
+  automatic flip-back).
+
 # Evidence
 
 # Open questions

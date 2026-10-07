@@ -33,3 +33,7 @@ __pycache__/
 
 # private overlay with real IPs/usernames for this deployment
 docs/knowledge/local/
+
+# private site bundles (contain secrets)
+*.site.tgz
+site-*.tgz

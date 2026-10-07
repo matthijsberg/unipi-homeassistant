@@ -11,7 +11,10 @@ gates (a goldfish prepares, Matthijs decides/acts). Update `task_status` here **
 * [T03 Backup/deploy/rollback/health tooling](T03-deploy-rollback-tooling.md) - medium · deps: T02 · **done 2026-10-07** (1 bug found+fixed in live test)
 * [T04 Test harness + characterization tests](T04-test-harness.md) - low · deps: T02 · **done 2026-10-07 (43 tests)**
 
-Milestone **v2.1.0** = T03 + T04 merged (runtime code identical to v2.0.0).
+* [T05 BaseOS bootstrap, release layout, site bundle](T05-bootstrap-and-release-layout.md) - medium · deps: T03, T04 · todo
+* [T06 Validate bootstrap in a clean arm64 Debian 12](T06-validate-bootstrap.md) - 🔒 · low · deps: T05 · todo
+
+Milestone **v2.1.0** = T03 + T04 merged (runtime code identical to v2.0.0, **released**). T05/T06 = the L513 rebuild kit ([ADR-006](/decisions/ADR-006-baseos-deployment.md)); they can run in parallel with Phase 1.
 
 # Phase 1 — Generic core features (developed and soaked on the S103)
 
@@ -39,7 +42,7 @@ T14/T15/T16/T18 can run in parallel after T11 (different files, except small hoo
 
 # Phase 3 — L513 upgrade and cutover (maintenance window)
 
-* [T30 Pre-flight + go/no-go](T30-l513-preflight.md) - 🔒 · medium · deps: T01, T23 · todo
+* [T30 Pre-flight + go/no-go](T30-l513-preflight.md) - 🔒 · medium · deps: T01, T06, T23 · todo
 * [T31 Flash evok 3 on a new card + circuit map](T31-l513-flash-and-map.md) - 🔒 · **high** · deps: T30 · todo
 * [T32 Start bridge with legacy adapter + acceptance walk (v2.4.0)](T32-l513-cutover.md) - 🔒 · **high** · deps: T31, T22 · todo
 * [T33 7-day soak + accept](T33-l513-soak.md) - 🔒 · medium · deps: T32 · todo

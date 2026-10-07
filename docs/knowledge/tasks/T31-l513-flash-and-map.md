@@ -58,6 +58,14 @@ Card swap per runbook (≤ 10 min). Log reason.
 # Feed the elephant
 Map concept; inventory (OS, evok version, hostname); `/log.md` with timings.
 
+# Amendment 2026-10-07 ([ADR-006](/decisions/ADR-006-baseos-deployment.md))
+- Flash **BaseOS** onto the new card; Evok is **not** preinstalled — `bootstrap.sh` installs it
+  (phase 1 → reboot → phase 2). The goldfish now needs SSH to the **new** L513 install (not the
+  old one): 🔒 HUMAN adds the S103 key at first boot.
+- The first-time xS30/1-wire Evok configuration is done by hand once, then captured with
+  `site-bundle.sh export l513` so the next rebuild is automatic.
+- Output additionally: the exported site bundle (stored by Matthijs, not in git).
+
 # Evidence
 
 # Open questions

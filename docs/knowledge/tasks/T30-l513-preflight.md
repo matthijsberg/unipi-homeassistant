@@ -5,7 +5,7 @@ title: "Pre-flight and go/no-go for the L513 evok-3 upgrade"
 description: "Everything needed for the L513 upgrade is verified and prepared, and Matthijs has given an explicit GO with a scheduled maintenance window."
 phase: 3
 task_status: todo
-depends_on: [T01, T23]
+depends_on: [T01, T06, T23]
 risk: medium
 human_gate: true
 target_hosts: [l513]
@@ -61,6 +61,16 @@ Nothing changed on the L513.
 
 # Feed the elephant
 New runbook; `/log.md`; inventory.
+
+# Amendment 2026-10-07 ([ADR-006](/decisions/ADR-006-baseos-deployment.md))
+- The new SD card uses **Unipi BaseOS** (built by hand by Matthijs). The runbook this task writes
+  must use `tools/bootstrap.sh` (T05) for everything after first boot, not hand-installed steps.
+- **🔒 HUMAN** downloads BaseOS, records the exact image name/Debian version/sha256 in the inventory.
+- First boot: DHCP + SSH, user `unipi`, **default password publicly documented → change it
+  immediately**; put this Unipi's key in `authorized_keys` so the goldfish can run the bootstrap
+  over SSH (or Matthijs runs the printed commands himself).
+- Prerequisite: the latest **site bundle** exists for the L513 (first time: created after T31
+  by `site-bundle.sh export`; a re-flash reuses it). Kept on Matthijs' Mac/NAS (plain, secret).
 
 # Evidence
 
