@@ -1,0 +1,17 @@
+# Read-only twin of the bridge for testing a new version next to the live one. NOT enabled by default.
+# Setup: see docs/knowledge/runbooks/shadow-instance.md
+[Unit]
+Description=Unipi bridge SHADOW instance (read-only, never writes to evok)
+Wants=network-online.target
+After=network-online.target evok.service
+
+[Service]
+User=unipi
+WorkingDirectory=/home/unipi/shadow
+Environment=UNIPI_MODE=shadow
+ExecStart=/home/unipi/unipi-homeassistant/bin/python /home/unipi/shadow/release/hass-unipi.py --config /home/unipi/shadow/config.json
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

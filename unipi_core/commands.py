@@ -27,6 +27,9 @@ class CommandService:
         queue was full (command dropped, error logged). `block=True` keeps the legacy behaviour of
         AO fades (blocking put) until T12 replaces them."""
         cmd = {"cmd": "set", "dev": dev, "circuit": circuit, "value": value}
+        if getattr(self.bridge, "shadow", False):
+            self.bridge.logger.info(f"SHADOW: would queue {cmd}")
+            return cmd
         q = self.bridge.mqtt_to_websocket_queue
         try:
             if block:

@@ -30,11 +30,15 @@ BINARY_SENSOR_CLASSES = {
     "vibration", "window",
 }
 
-PLANNED_KEYS = {
-    "off_delay_s": "T14", "counter": "T15", "counter_interval_s": "T15", "unit": "T16",
-    "transform": "T16", "sampling": "T16", "valid_range": "T16", "reject_values": "T16",
-    "ha_component": "T19",
+# Options that will NOT be implemented in the bridge (decision 2026-10-07, ADR-005): do it in Home Assistant.
+HA_SIDE_KEYS = {
+    "off_delay_s": "PIR hold: use a template binary_sensor with delay_off in Home Assistant (T14 dropped)",
+    "transform": "scaling: use a value_template in Home Assistant (T16 dropped)",
+    "sampling": "averaging: use the statistics/filter integrations in Home Assistant (T16 dropped)",
+    "valid_range": "range checks: use a template in Home Assistant (T16 dropped)",
+    "reject_values": "range checks: use a template in Home Assistant (T16 dropped)",
 }
+PLANNED_KEYS = {"ha_component": "T19"}
 OUTPUT_DEVS = {"do", "ro", "led"}  # digital outputs: the only devices the sequencer drives
 SEQUENCER_KEYS = {"failsafe_off", "max_on_s", "pulse_defaults", "max_count", "max_pulse_ms", "presets"}
 
@@ -77,6 +81,10 @@ class CircuitConfig(BaseModel):
     name: str | None = None
     device_class: str | None = None
     inverted: bool | None = None  # None = not set here (legacy "inputs" section may still apply)
+    # --- pulse counter (T15); digital inputs only ---
+    counter: bool = False                                   # publish evok's hardware counter as a total_increasing sensor
+    counter_interval_s: float = Field(default=10, ge=1, le=3600)   # publish at most this often (when changed)
+    unit: str | None = None                                 # unit of the counter sensor (e.g. "L" for a water meter)
     # --- output sequencer (T12); digital outputs only ---
     failsafe_off: bool = False                 # drive OFF after start-up / WS reconnect / shutdown
     max_on_s: float | None = Field(default=None, gt=0)       # watchdog + upper bound for duration_s
@@ -128,6 +136,8 @@ class CircuitConfig(BaseModel):
                     "suggested_area, no per-entity area. Assign areas to entities in Home Assistant."
                 )
             for k in data:
+                if k in HA_SIDE_KEYS:
+                    raise ValueError(f"option '{k}' is not a bridge feature - {HA_SIDE_KEYS[k]}")
                 if k in PLANNED_KEYS:
                     raise ValueError(f"option '{k}' is planned ({PLANNED_KEYS[k]}) but not supported in this version")
         return data
@@ -165,6 +175,10 @@ def canonicalize_circuits(raw: Any) -> Any:
                 raise ValueError(f"circuit '{ck}': 'inverted' only applies to digital inputs (di)")
             if "device_class" in v and dev in ("led", "ao", "1wdevice"):
                 raise ValueError(f"circuit '{ck}': 'device_class' is not supported for {dev} entities")
+            if ("counter" in v or "counter_interval_s" in v) and dev != "di":
+                raise ValueError(f"circuit '{ck}': 'counter' only applies to digital inputs (di)")
+            if "unit" in v and not v.get("counter"):
+                raise ValueError(f"circuit '{ck}': 'unit' only applies to counters (set \"counter\": true)")
             used = SEQUENCER_KEYS & set(v)
             if used and dev not in OUTPUT_DEVS:
                 raise ValueError(f"circuit '{ck}': {sorted(used)} only apply to digital outputs (do/ro/led)")

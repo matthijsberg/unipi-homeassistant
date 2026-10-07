@@ -36,6 +36,8 @@ description: "The project's long-term memory (the \"Elephant\"): context, contra
 
 * [Backup and rollback](runbooks/backup-and-rollback.md) - before every change; how to go back
 * [Deploy](runbooks/deploy.md) - the only way to change a live box
+* [Shadow instance](runbooks/shadow-instance.md) - test a new version next to the live bridge, risk-free
+* [Hardware test session](runbooks/hardware-test-session.md) - what only a person at the Unipi can verify, step by step
 
 # Conventions
 

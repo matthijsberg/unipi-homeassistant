@@ -4,7 +4,7 @@ id: T18
 title: "Add shadow mode for a read-only second instance"
 description: "A second bridge instance with mode shadow can run next to the live one on the same Unipi without writing to evok, firing rules, or touching the live MQTT topics."
 phase: 1
-task_status: todo
+task_status: done
 depends_on: [T10]
 risk: low
 human_gate: false
@@ -54,5 +54,11 @@ Stop and disable the shadow unit.
 interface-core §6 implemented; `/runbooks/deploy.md` "shadow step" uses it; `/log.md`.
 
 # Evidence
+- 2026-10-07: **234 passed**; shadow has 11 tests. Core proof: every command path (MQTT ON/OFF, analog fade, pulse, timed, preset, plain OFF, four rule actions, `send_ws`, fail-safe, `set_digital`, `transition`, and the two raw send functions) is driven against a shadow instance → `websocket.sent == []`, nothing queued for evok, and `SHADOW: would …` lines logged.
+- **Design change vs the card (reason: found while reading the code)**: instead of *requiring* a different MQTT root, the shadow's device name gets a `_shadow` suffix. The discovery topic and `unique_id` contain the device name but **not** the MQTT root, so a shadow with the same device name would have silently overwritten the live entities' retained discovery. With the suffix every topic, unique_id, identifier and discovery node differs (tested against a live bridge on the same snapshot: 0 shared discovery topics, unique_ids or device identifiers). The shadow also never reads/writes the live `.device_name` cache.
+- No web UI in shadow; discovery configs are dropped by the MQTT worker unless `shadow_discovery: true`; names tagged "(shadow)".
+- Tools: `tools/hass-unipi-shadow.service.example`, `tools/shadow_compare.py` (live vs shadow state diff), `tools/clear_shadow_topics.py` (dry-run default; its matcher provably cannot hit live topics), runbook `/runbooks/shadow-instance.md`, `config.shadow.example.json`.
+- Mutation checks: 9 breaks (each guard removed) → all caught (one result line looked odd and was re-run to read the real outcome).
+- **Not done (for the testing session)**: the 1 h real shadow run next to the live bridge (card acceptance, human-approved).
 
 # Open questions

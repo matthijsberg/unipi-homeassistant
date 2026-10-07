@@ -139,7 +139,7 @@ Circuit names are placeholders until the L513 evok-3 map exists (T31).
 | `toggle` **[NEW]** | – | flip a digital output |
 | `pulse` **[NEW]** | `action_pulse: {count,on_ms,off_ms}` or `action_preset` | runs §2 sequence (same engine, same limits) |
 
-# 6. Modes **[NEW T18]**
+# 6. Modes **[IMPLEMENTED T18 — with a device-name suffix instead of a different root, see T18 evidence]**
 
 `"mode": "live" | "shadow"` (default `live`). Shadow = read-only twin for safe testing next
 to a live instance: own `<root>` (e.g. `unipi_shadow`), discovery disabled unless
