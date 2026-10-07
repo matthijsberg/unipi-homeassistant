@@ -4,7 +4,7 @@ id: T15
 title: "Publish digital-input pulse counters as total_increasing sensors"
 description: "Inputs with counter true get a discovered counter sensor fed from the evok counter field, rate-limited, surviving evok counter resets."
 phase: 1
-task_status: todo
+task_status: done
 depends_on: [T11]
 risk: low
 human_gate: false
@@ -52,5 +52,10 @@ Remove `counter` from config; `tools/rollback.sh <previous rc>`.
 G8 handled; `/log.md`.
 
 # Evidence
+- 2026-10-07: `pytest -q` → **234 passed** together with T18 (+ 16 counter tests). Looked at the live box first: evok **does push `counter`** inside its `di` WebSocket messages, and several inputs have running counters (e.g. one at 24235), so the data is real. A REST poll every `counter_interval_s` stays as a safety net.
+- Implemented: circuit options `counter`, `counter_interval_s` (1–3600, default 10), `unit` (only valid with `counter`; digital inputs only); discovered `sensor` `…/di_<c>_counter` (`state_class: total_increasing`, `{"value": n}`), retained; publish only on change and at most every interval (the latest value is held and flushed); initial value at discovery; republish forces; reset to a lower value is published as it is; `input_changed(subkey="counter")` for the legacy adapter.
+- Removed from the config model on the way: the T14/T16 option names now fail with "not a bridge feature - do it in Home Assistant" (ADR-005).
+- Mutation checks: 10 breaks; 2 needed a second look (a malformed mutation → redone; a real survivor — unchanged values re-published after the interval — got its own test); all caught.
+- Not done on hardware: counting needs a real pulse source; the live config is untouched (no `counter` configured on the S103). Enable e.g. `circuits."di/<c>" = {"counter": true, "unit": "L"}` to try it.
 
 # Open questions

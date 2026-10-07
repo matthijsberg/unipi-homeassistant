@@ -24,10 +24,10 @@ Milestone **v2.1.0** = T03 + T04 merged (runtime code identical to v2.0.0, **rel
 * [T12 Output sequencer: pulse / duration / safety](T12-output-sequencer.md) - **high** · deps: T11 · **done 2026-10-07 (rc5 live, 154 tests; 2 bugs found+fixed on hardware; soak running)**
 * [T13 Presets as HA buttons](T13-ha-presets-buttons.md) - low · deps: T12 · todo
 * [T14 PIR hold (off-delay)](T14-input-hold-off-delay.md) - ~~dropped~~ → Home Assistant
-* [T15 Counter inputs](T15-counter-inputs.md) - low · deps: T11 · todo
+* [T15 Counter inputs](T15-counter-inputs.md) - low · deps: T11 · **code done (rc7), no counter configured live yet**
 * [T16 Sensor transform / sampling / validation](T16-sensor-transform-sampling.md) - ~~dropped~~ → Home Assistant
 * [T17 Local rules: pulse / toggle / dimmer, `when` always|ha_offline](T17-local-rule-actions.md) - medium · deps: T12 · **code done (205 tests), S103 deploy pending**
-* [T18 Shadow mode](T18-shadow-mode.md) - 🔒 · low · deps: T10 · todo
+* [T18 Shadow mode](T18-shadow-mode.md) - 🔒 · low · deps: T10 · **code done (rc7); real 1 h shadow run pending**
 * [T19 (optional) AO as fan/number](T19-ao-component-override.md) - 🔒 · low · deps: T11 · todo
 
 Milestone **v2.2.0** = T10–T18 merged, S103 healthy 7 days on the last rc.

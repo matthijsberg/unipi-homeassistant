@@ -78,6 +78,12 @@
           }
         }
       }
+    },
+    "di/1_04": {
+      "name": "Water meter",
+      "counter": true,
+      "counter_interval_s": 10,
+      "unit": "L"
     }
   }
 }

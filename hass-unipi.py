@@ -22,7 +22,7 @@ import secrets
 import uuid
 from dataclasses import dataclass
 from functools import wraps
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 from urllib.parse import urlparse
 import importlib
 
@@ -85,7 +85,7 @@ else:
     print("Required libraries check passed.")
 
 # --- Script Version ---
-SCRIPT_VERSION = "2.2.0-rc6"
+SCRIPT_VERSION = "2.2.0-rc7"
 
 # --- Constants ---
 # Last discovered device name, so the MQTT last-will can use the device's own
@@ -176,6 +176,10 @@ class AppConfig(BaseModel):
     extensions: ExtensionsConfig = Field(default_factory=ExtensionsConfig)
     web_server: WebServerConfig = Field(default_factory=WebServerConfig)
     inputs: dict[str, dict[str, bool]] = Field(default_factory=dict)
+    # "shadow" = read-only twin that can run next to the live bridge: never writes to evok, never runs rules,
+    # never starts the web UI, publishes under "<device>_shadow" names (and no HA discovery unless asked).
+    mode: Literal["live", "shadow"] = "live"
+    shadow_discovery: bool = False
     # Per-circuit settings keyed "<dev>/<circuit>", see unipi_core/circuits.py
     circuits: dict[str, CircuitConfig] = Field(default_factory=dict)
 
@@ -236,6 +240,9 @@ class AppConfig(BaseModel):
             config_data.setdefault("mqtt", {})["discovery_prefix"] = os.getenv(
                 "MQTT_DISCOVERY_PREFIX"
             )
+
+        if os.getenv("UNIPI_MODE"):
+            config_data["mode"] = os.getenv("UNIPI_MODE", "").lower()
 
         # WebSocket
         if os.getenv("WEBSOCKET_URL"):
@@ -580,6 +587,7 @@ class UnipiBridge:
         self.local_logic = LocalLogicEngine(rules_path, self.logger, validator=self.validate_rule)
 
         # State
+        self.shadow: bool = self.config.mode == "shadow"
         self.device_name: str = self._load_cached_device_name()
         # Topic of the last-will registered with the broker on (re)connect
         self._lwt_topic: str = ""
@@ -607,6 +615,8 @@ class UnipiBridge:
         # Stores device info (SN, Model)
         self.device_info: dict[str, Any] | None = None
         self.dimmer_states: dict[str, dict[str, Any]] = {}
+        # T15: per-circuit counter publishing state {published, published_at, pending}
+        self._counters: dict[str, dict[str, Any]] = {}
 
         # Queues
         self.mqtt_to_websocket_queue: queue.Queue[str] = queue.Queue(maxsize=1000)
@@ -722,13 +732,15 @@ class UnipiBridge:
         self.logger.critical("---------------------------------------------------")
         self.logger.critical("   UnipiBridge Started")
         self.logger.critical(f"   Version: {SCRIPT_VERSION}")
+        if self.shadow:
+            self.logger.critical("   MODE: SHADOW (read-only; no evok writes, no rules, no web UI)")
         self.logger.critical("---------------------------------------------------")
 
         self.logger.info(f"UnipiBridge Started - Version: {SCRIPT_VERSION}")
         self.logger.info(f"Log Level: {self.config.logging.level}")
 
         # Start Web Server
-        if self.config.web_server.enabled:
+        if self._web_server_enabled():
             self.loop.create_task(self.setup_web_server())
 
         if self.recorder:
@@ -765,6 +777,10 @@ class UnipiBridge:
 
         # Start MQTT Monitor
         self.loop.create_task(self._mqtt_monitor(), name="MqttMonitorTask")
+
+        # Pulse counters: REST safety net next to the WebSocket pushes (only if any counter is configured)
+        if any(c.counter for c in self.config.circuits.values()):
+            self.loop.create_task(self._counter_poller(), name="CounterPollerTask")
 
         # Max-on watchdog for outputs with max_on_s
         self.loop.create_task(self._sequencer_watchdog(), name="SequencerWatchdogTask")
@@ -993,7 +1009,16 @@ class UnipiBridge:
         except Exception as e:
             self.logger.error(f"Async startup error: {e}", exc_info=True)
 
+    def _web_server_enabled(self) -> bool:
+        """The rule-editor web UI never runs in a shadow instance (it would fight the live one for the port)."""
+        return self.config.web_server.enabled and not self.shadow
+
+    def _shadow_tag(self) -> str:
+        return " (shadow)" if self.shadow else ""
+
     def _load_cached_device_name(self) -> str:
+        if self.shadow:
+            return ""  # the cache belongs to the live instance
         try:
             with open(DEVICE_NAME_CACHE_FILE) as f:
                 return f.read().strip()
@@ -1001,6 +1026,8 @@ class UnipiBridge:
             return ""
 
     def _save_cached_device_name(self) -> None:
+        if self.shadow:
+            return
         try:
             with open(DEVICE_NAME_CACHE_FILE, "w") as f:
                 f.write(self.device_name)
@@ -1331,6 +1358,14 @@ class UnipiBridge:
         while not self.should_stop.is_set():
             try:
                 topic, value = self.websocket_to_mqtt_queue.get(timeout=1)
+                if (
+                    self.shadow
+                    and not self.config.shadow_discovery
+                    and topic.startswith(f"{self.config.mqtt.discovery_prefix}/")
+                    and topic.endswith("/config")
+                ):
+                    self.websocket_to_mqtt_queue.task_done()
+                    continue  # shadow without shadow_discovery creates no Home Assistant entities
                 self.logger.debug(
                     f"MQTT Worker: Dequeued message for topic '{topic}'. Publishing..."
                 )
@@ -1340,6 +1375,7 @@ class UnipiBridge:
                         "/output",
                         "/config",
                         "/status",
+                        "/counter",
                         "/temp",
                         "/humidity",
                         "/vdd",
@@ -1417,8 +1453,61 @@ class UnipiBridge:
                     pass
         self.logger.info("WebSocket worker thread finished.")
 
+    # ---- T15: pulse counters ------------------------------------------------------------------
+    def _publish_counter(self, circuit: str, value: int, st: dict[str, Any], now: float, source: str) -> None:
+        topic = self.generate_mqtt_topic_update("di", circuit, "counter")
+        self._enqueue_ws_to_mqtt((topic, json.dumps({"value": value})))
+        st.update(published=value, published_at=now, pending=None)
+        self.events.emit(INPUT_CHANGED, dev="di", circuit=circuit, value=value, raw=value,
+                         ts=time.time(), source=source, subkey="counter")
+
+    def _counter_update(self, circuit: str, counter: Any, force: bool = False, source: str = "ws") -> None:
+        """Publish evok's hardware counter, at most every counter_interval_s and only when it changed.
+        A lower value than before (evok/device reset) is published as it is; HA copes with total_increasing."""
+        cfg = self.circuits.get("di", circuit)
+        if not cfg.counter:
+            return
+        try:
+            value = int(counter)
+        except (TypeError, ValueError):
+            return
+        st = self._counters.setdefault(circuit, {"published": None, "published_at": 0.0, "pending": None})
+        now = time.monotonic()
+        if value == st["published"] and not force:
+            st["pending"] = None
+        elif force or st["published"] is None or now - st["published_at"] >= cfg.counter_interval_s:
+            self._publish_counter(circuit, value, st, now, source)
+        else:
+            st["pending"] = value  # too soon; the poller (or the next update) publishes it
+
+    def _counter_flush(self) -> None:
+        now = time.monotonic()
+        for circuit, st in self._counters.items():
+            interval = self.circuits.get("di", circuit).counter_interval_s
+            if st["pending"] is not None and now - st["published_at"] >= interval:
+                self._publish_counter(circuit, st["pending"], st, now, "ws")
+
+    async def _counter_poller(self) -> None:
+        """Safety net next to the WebSocket pushes: read all counters over REST every interval."""
+        interval = min(c.counter_interval_s for c in self.config.circuits.values() if c.counter)
+        while not self.should_stop.is_set():
+            try:
+                await asyncio.sleep(interval)
+                data = await self.get_unipi_data(scope="all")
+                for item in data or []:
+                    if item.get("dev") == "di" and "counter" in item:
+                        self._counter_update(str(item.get("circuit")), item["counter"], source="rest")
+                self._counter_flush()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                self.logger.error(f"Counter poller error: {e}", exc_info=True)
+
     async def _ws_write_now(self, dev: str, circuit: str, value: int) -> None:
         """Write one `set` straight to the evok WebSocket (no queue, no hold). Raises if it cannot."""
+        if self.shadow:
+            self.logger.info(f"SHADOW: would write {dev}/{circuit} = {value}")
+            return
         ws = self.websocket_connection
         if ws is None or ws.state != State.OPEN:
             raise WebSocketUnavailable("evok WebSocket is not open")
@@ -1487,6 +1576,9 @@ class UnipiBridge:
         Args:
             message: The message string to send.
         """
+        if self.shadow:
+            self.logger.info(f"SHADOW: would send {message}")
+            return
         ws = self.websocket_connection
         if ws is not None and ws.state == State.OPEN:
             try:
@@ -1639,6 +1731,10 @@ class UnipiBridge:
             device_sn = device_info.get("sn", "unknown")
             device_family = device_info.get("family", "unknown")
             self.device_name = f"{device_family}_{device_model}_{device_sn}"
+            if self.shadow:
+                # Every topic, unique_id and discovery node id derives from this name, so the shadow can
+                # never collide with (or overwrite the retained discovery of) the live instance.
+                self.device_name += "_shadow"
             self.device_info = device_info
             self.logger.info(f"Determined device name: {self.device_name}")
             self._save_cached_device_name()
@@ -1994,7 +2090,7 @@ class UnipiBridge:
             d_model = self.device_info.get("model", "Unknown")
             d_sn = self.device_info.get("sn", "0000")
 
-            pretty_name = f"Unipi {d_family} {d_model} ({d_sn}) - Status"
+            pretty_name = f"Unipi {d_family} {d_model} ({d_sn}) - Status{self._shadow_tag()}"
             # User requested model to be "Neuron S103" (family + model)
             pretty_model = f"{d_family} {d_model}"
         else:
@@ -2148,7 +2244,7 @@ class UnipiBridge:
 
         dev_info = {
             "identifiers": [self.device_name],
-            "name": f"Unipi {device_family} {device_model} ({device_sn})",
+            "name": f"Unipi {device_family} {device_model} ({device_sn}){self._shadow_tag()}",
             "manufacturer": "Unipi Technology s.r.o.",
             "model": f"{device_family} {device_model}",
             "sn": device_sn,
@@ -2157,7 +2253,7 @@ class UnipiBridge:
             dev_info["configuration_url"] = configuration_url
 
         config = {
-            "name": self.circuits.name(dev_type, circuit, f"{dev_type} {circuit}"),
+            "name": self.circuits.name(dev_type, circuit, f"{dev_type} {circuit}") + self._shadow_tag(),
             "unique_id": unique_id,
             "dev": dev_info,
             "origin": {
@@ -2306,6 +2402,28 @@ class UnipiBridge:
             if state_topic and state_payload is not None:
                 self._enqueue_ws_to_mqtt((state_topic, state_payload))
 
+        # T15: the hardware pulse counter of a digital input becomes its own total_increasing sensor
+        if dev_type == "di" and self.circuits.get(dev_type, circuit).counter:
+            ccfg = self.circuits.get(dev_type, circuit)
+            cc = {k: config[k] for k in ("dev", "origin", "qos", "availability_topic",
+                                         "payload_available", "payload_not_available")}
+            cc.update({
+                "name": f"{config['name']} counter",
+                "unique_id": f"{unique_id}_counter",
+                "state_topic": self.generate_mqtt_topic_update("di", circuit, "counter"),
+                "value_template": "{{ value_json.value }}",
+                "state_class": "total_increasing",
+                "icon": "mdi:counter",
+            })
+            if ccfg.unit:
+                cc["unit_of_measurement"] = ccfg.unit
+            self._enqueue_ws_to_mqtt((
+                self.generate_mqtt_topic_discovery("di", f"{circuit}_counter", "config", component="sensor"),
+                json.dumps(cc),
+            ))
+            if "counter" in json_data:
+                self._counter_update(circuit, json_data["counter"], force=True, source="republish")
+
     @log_function
     def _publish_1wdevice_discovery(
         self, json_data: dict[str, Any], device_info: dict[str, Any]
@@ -2326,7 +2444,7 @@ class UnipiBridge:
 
         dev_info = {
             "identifiers": [self.device_name],
-            "name": f"Unipi {device_family} {device_model} ({device_sn})",
+            "name": f"Unipi {device_family} {device_model} ({device_sn}){self._shadow_tag()}",
             "manufacturer": "Unipi Technology s.r.o.",
             "model": f"{device_family} {device_model}",
             "sn": device_sn,
@@ -2376,7 +2494,7 @@ class UnipiBridge:
                 )
 
                 config = {
-                    "name": self.circuits.name("1wdevice", circuit, f"1-Wire {circuit} {sensor_meta['name']}", subkey=sensor_key),
+                    "name": self.circuits.name("1wdevice", circuit, f"1-Wire {circuit} {sensor_meta['name']}", subkey=sensor_key) + self._shadow_tag(),
                     "unique_id": unique_id,
                     "dev": dev_info,
                     "origin": {
@@ -2709,6 +2827,10 @@ class UnipiBridge:
             # For 1wdevice, the value might not be in the "value" key, but in specific sensor keys
             dev = json_data.get("dev", "unknown")
             circuit = json_data.get("circuit", "unknown")
+
+            if dev == "di" and "counter" in json_data:
+                self._counter_update(circuit, json_data["counter"], force=force,
+                                     source="republish" if force else "ws")
 
             if dev == "1wdevice":
                 generated_mqtt_messages = self._publish_1wdevice_values(
@@ -3595,6 +3717,9 @@ class UnipiBridge:
 
     def execute_local_action(self, action: dict[str, Any]) -> None:
         """Executes a local action generated by the logic engine."""
+        if self.shadow:
+            self.logger.info(f"SHADOW: rule action would run: {action}")
+            return
         try:
             dev = action.get("dev")
             circuit = action.get("circuit")
