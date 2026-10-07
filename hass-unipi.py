@@ -78,7 +78,7 @@ else:
     print("Required libraries check passed.")
 
 # --- Script Version ---
-SCRIPT_VERSION = "2026092501"
+SCRIPT_VERSION = "2.2.0-rc1"
 
 # --- Constants ---
 # Last discovered device name, so the MQTT last-will can use the device's own
