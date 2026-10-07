@@ -75,13 +75,15 @@ def test_ao_out_of_range_brightness_rejected(discovered, fast_sleep):
     assert ws_cmds(b) == []
 
 
-def test_json_command_to_relay_is_not_supported_yet(discovered, fast_sleep):
-    """PINS KNOWN ISSUE K1: any JSON on /set is routed to the analog-output fade path, so a
-    relay ignores {"pulse":...}/{"duration_s":...}. T12 changes this ON PURPOSE - update then."""
+def test_unsupported_json_to_relay_is_rejected_not_sent_to_fade_path(discovered, fast_sleep):
+    """T12 (was K1): JSON for a digital output no longer goes to the analog fade path; unsupported keys
+    are rejected with an explanation and nothing is switched."""
     b = discovered
     b.on_mqtt_message(None, None, fake_message(RO, json.dumps({"state": "ON", "brightness": 1})))
     settle(b, 0.2)
-    assert ws_cmds(b) == [] and drain(b.websocket_to_mqtt_queue) == []
+    assert ws_cmds(b) == []
+    out = dict(drain(b.websocket_to_mqtt_queue))
+    assert "brightness" in json.loads(out[f"unipi/{DN}/ro/xS51_01/attributes"])["last_error"]
 
 
 def test_topic_split(discovered):

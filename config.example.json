@@ -40,6 +40,44 @@
       "name": "Front door contact",
       "device_class": "door",
       "inverted": true
+    },
+    "relay/2_02": {
+      "name": "Doorbell",
+      "failsafe_off": true,
+      "max_on_s": 2,
+      "max_count": 6,
+      "pulse_defaults": {
+        "on_ms": 100,
+        "off_ms": 250
+      },
+      "presets": {
+        "ring_back": {
+          "label": "Doorbell back door (2x)",
+          "pulse": {
+            "count": 2
+          }
+        },
+        "ring_front": {
+          "label": "Doorbell front door (3x)",
+          "pulse": {
+            "count": 3
+          }
+        }
+      }
+    },
+    "relay/1_01": {
+      "name": "Roof window",
+      "failsafe_off": true,
+      "max_on_s": 60,
+      "presets": {
+        "open_35s": {
+          "label": "Open roof window (35 s)",
+          "timed": {
+            "state": "ON",
+            "duration_s": 35
+          }
+        }
+      }
     }
   }
 }

@@ -9,7 +9,7 @@ generated: { by: claude-code/claude-opus-5-5, at: 2026-10-07T09:30:00Z }
 
 | # | Where | Issue | Impact | Handled in |
 |---|---|---|---|---|
-| K1 | `on_mqtt_message` | Every JSON payload on any `/set` is routed to `process_ao_transition`; non-AO devs are rejected there. | JSON commands to relays (pulse/duration) impossible. | T12 |
+| K1 | `on_mqtt_message` | Every JSON payload on any `/set` was routed to `process_ao_transition`; non-AO devs were rejected there. | JSON commands to relays (pulse/duration) impossible. | **Fixed in T12** (routed by device type) |
 | K2 | `websocket_worker_thread` | Holds a command up to 30 s while WS is down, then drops it silently. | Late rings/window moves; a dropped OFF. | T12 (sequencer bypasses queue; OFF priority) |
 | K3 | `publish_discovery_config` | `inputs.inverted` only swapped HA payloads; `device_states` and rules saw the raw value. | Rules on NC contacts were inverted vs HA. | **Fixed in T11** (logical inversion at the input edge; parity test proves HA sees the same state) |
 | K4 | `execute_local_action` | Rule `action_transition` is treated as **ms**; MQTT `transition` is **s**. | Confusing; easy misconfiguration. | T17 (document + validate; keep ms for rules, name it `action_transition_ms` alias) |

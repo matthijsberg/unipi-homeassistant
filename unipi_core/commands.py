@@ -48,3 +48,10 @@ class CommandService:
         """Fade an analog output to `target` (0-1000) over `seconds`, as an MQTT JSON command would."""
         topic = self.bridge.generate_mqtt_topic_update(dev, circuit, "set")
         await self.bridge.process_ao_transition(topic, "", seconds, target)
+
+    async def sequence(self, dev: str, circuit: str, spec: Any, origin: str = "mqtt") -> None:
+        """Run a Pulse/Timed sequence on a digital output (raises SequenceRejected)."""
+        await self.bridge.sequencer.start(dev, circuit, spec, origin)
+
+    async def cancel_sequence(self, dev: str, circuit: str, reason: str = "cancelled") -> bool:
+        return await self.bridge.sequencer.cancel(dev, circuit, reason)

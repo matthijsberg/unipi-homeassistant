@@ -35,6 +35,12 @@ from aiohttp import web
 from unipi_core.circuits import CircuitConfig, CircuitRegistry, canonicalize_circuits
 from unipi_core.commands import CommandService
 from unipi_core.events import AVAILABILITY, INPUT_CHANGED, OUTPUT_CHANGED, EventBus
+from unipi_core.sequencer import (
+    OutputSequencer,
+    SequenceRejected,
+    WebSocketUnavailable,
+    parse_command,
+)
 
 # --- Check Required Libraries ---
 REQUIRED_LIBRARIES = {
@@ -596,6 +602,19 @@ class UnipiBridge:
         # Internal API: observe state changes (events) / drive outputs (commands)
         self.events = EventBus(self.loop, self.logger)
         self.commands = CommandService(self)
+        # Output sequencer: pulse trains / timed outputs with limits and fail-safes (T12)
+        self.sequencer = OutputSequencer(
+            write=self._ws_write_now,
+            ack=lambda dev, circuit, on, origin: self.mqtt_ack(
+                "ON" if on else "OFF", dev, circuit, origin=origin
+            ),
+            set_attributes=self._publish_attributes,
+            limits_for=lambda dev, circuit: self.circuits.limits(dev, circuit),
+            is_ready=lambda: self.websocket_connection is not None
+            and self.websocket_connection.state == State.OPEN,
+            logger=self.logger,
+        )
+        self.events.subscribe(INPUT_CHANGED, self._on_input_for_sequencer)
 
         # MQTT Client
         api_version = getattr(mqtt, "CallbackAPIVersion", None)
@@ -717,6 +736,9 @@ class UnipiBridge:
         # Start MQTT Monitor
         self.loop.create_task(self._mqtt_monitor(), name="MqttMonitorTask")
 
+        # Max-on watchdog for outputs with max_on_s
+        self.loop.create_task(self._sequencer_watchdog(), name="SequencerWatchdogTask")
+
         # Run Loop
         try:
             self.logger.info("Starting asyncio event loop...")
@@ -741,6 +763,12 @@ class UnipiBridge:
         """
         self.logger.info("Shutdown sequence started.")
         self.should_stop.set()
+
+        # Never leave a bell coil / window motor energised: cancel sequences, drive failsafe outputs OFF
+        try:
+            self.loop.run_until_complete(asyncio.wait_for(self._shutdown_outputs(), 5))
+        except Exception as e:
+            self.logger.error(f"Output fail-safe at shutdown failed: {e}")
 
         # Cancel all running tasks
         pending = asyncio.all_tasks(self.loop)
@@ -1200,6 +1228,13 @@ class UnipiBridge:
 
         if topic.endswith("/set"):
             if data_type == "json":
+                route = self.mqtt_split_items_dataclass(topic, "")
+                if route and route.dev in ("do", "ro", "led"):
+                    # Digital outputs never take the analog fade path (fixes K1/K7)
+                    self.loop.call_soon_threadsafe(
+                        asyncio.create_task, self.process_output_json(topic, payload_data)
+                    )
+                    return
                 try:
 
                     transition_value = payload_data.get("transition", 0.0)
@@ -1350,6 +1385,59 @@ class UnipiBridge:
                 except ValueError:
                     pass
         self.logger.info("WebSocket worker thread finished.")
+
+    async def _ws_write_now(self, dev: str, circuit: str, value: int) -> None:
+        """Write one `set` straight to the evok WebSocket (no queue, no hold). Raises if it cannot."""
+        ws = self.websocket_connection
+        if ws is None or ws.state != State.OPEN:
+            raise WebSocketUnavailable("evok WebSocket is not open")
+        try:
+            await ws.send(json.dumps({"cmd": "set", "dev": dev, "circuit": circuit, "value": value}))
+        except Exception as e:
+            raise WebSocketUnavailable(f"WebSocket send failed: {e}") from e
+
+    def _publish_attributes(self, dev: str, circuit: str, attrs: dict[str, Any]) -> None:
+        topic = self.generate_mqtt_topic_update(dev, circuit, "attributes")
+        self._enqueue_ws_to_mqtt((topic, json.dumps(attrs)))
+
+    def _on_input_for_sequencer(self, dev, circuit, value, subkey=None, **_):
+        if subkey is None and dev in ("do", "ro", "led"):
+            self.sequencer.note_state(dev, circuit, value)
+
+    async def _sequencer_watchdog(self) -> None:
+        while not self.should_stop.is_set():
+            try:
+                await asyncio.sleep(1)
+                await self.sequencer.watchdog_tick()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                self.logger.error(f"Sequencer watchdog error: {e}", exc_info=True)
+
+    async def _shutdown_outputs(self) -> None:
+        await self.sequencer.cancel_all("shutdown")
+        await self.sequencer.failsafe_all(self.circuits.failsafe_keys(), "fail-safe at shutdown")
+
+    async def process_output_json(self, topic: str, payload_data: Any) -> None:
+        """JSON command for a digital output: pulse / duration / preset / plain state."""
+        parts = self.mqtt_split_items_dataclass(topic, "")
+        if not parts or not parts.dev or not parts.circuit:
+            self.logger.error(f"MQTT topic parsing failed for: {topic}")
+            return
+        dev, circuit = parts.dev, parts.circuit
+        try:
+            if not isinstance(payload_data, dict):
+                raise SequenceRejected("expected a JSON object")
+            spec = parse_command(
+                payload_data, self.circuits.limits(dev, circuit), self.circuits.get(dev, circuit).presets
+            )
+            if spec is None:  # plain {"state": "ON"|"OFF"}
+                await self.process_mqtt_message(topic, str(payload_data["state"]).upper())
+                return
+            await self.sequencer.start(dev, circuit, spec, origin="mqtt")
+        except SequenceRejected as e:
+            self.logger.warning(f"Rejected command for {dev}/{circuit}: {e} (payload: {payload_data!r})")
+            self._publish_attributes(dev, circuit, {"last_error": str(e)})
 
     async def send_to_websocket(self, message: str) -> None:
         """
@@ -2127,6 +2215,9 @@ class UnipiBridge:
                         )
                         self.mqtt_subscribe_topics.append(cmd_topic)
 
+        if dev_type in ("do", "ro", "led") and self.circuits.get(dev_type, circuit).sequencer_enabled():
+            config["json_attributes_topic"] = self.generate_mqtt_topic_update(dev_type, circuit, "attributes")
+
         if device_type_mapped in ("binary_sensor", "sensor", "switch"):
             device_class = self.circuits.device_class(dev_type, circuit, device_type_mapped)
             if device_class:
@@ -2399,6 +2490,11 @@ class UnipiBridge:
 
                     # Clear any previous bridge errors
                     self.publish_error(False, "OK")
+
+                    # Outputs flagged failsafe_off must not stay on across a bridge/WS interruption
+                    await self.sequencer.failsafe_all(
+                        self.circuits.failsafe_keys(), "fail-safe after WebSocket (re)connect"
+                    )
 
                     self.logger.debug("Starting WebSocket message handling loop...")
                     while not self.should_stop.is_set():
@@ -2697,6 +2793,10 @@ class UnipiBridge:
                             )
                         )
 
+                    case "do" | "ro" | "led" if self.sequencer.is_running(dev, circuit):
+                        # The sequencer owns the HA state while it runs (ON until it ends)
+                        self.logger.debug(f"WS->MQTT ({dev}): suppressing echo for {circuit} during a sequence")
+
                     case "di" | "do" | "ro" | "led":
                         state_topic = self.generate_mqtt_topic_update(dev, circuit, "state")
                         try:
@@ -2757,6 +2857,9 @@ class UnipiBridge:
                 f"Invalid payload '{message_payload}' for {parts.dev}/{parts.circuit}"
             )
             return
+
+        if self.sequencer.is_running(parts.dev, parts.circuit):
+            await self.sequencer.cancel(parts.dev, parts.circuit, f"plain {payload_upper} command")
 
         if parts.dev == "ao":
             circuit_key = (parts.dev, parts.circuit)

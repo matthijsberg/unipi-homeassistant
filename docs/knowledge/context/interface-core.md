@@ -30,7 +30,7 @@ v2.0.0 (= live `2026092501`).
 Retained `/set` messages are ignored (on first connect and always), so HA's `retain: true`
 switch commands never replay physical actions.
 
-# 2. Output sequences — pulse & duration **[NEW T12/T13]**
+# 2. Output sequences — pulse & duration **[IMPLEMENTED T12; buttons T13]**
 
 One command message, on the **existing** command topic of any digital output
 (`do`, `ro`, `led`; also `relay`/`output` aliases):

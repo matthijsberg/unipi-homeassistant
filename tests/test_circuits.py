@@ -45,7 +45,7 @@ def test_alias_duplicates_rejected(mod, tmp_path):
 @pytest.mark.parametrize("circuit,opts,msg", [
     ("di/1_01", {"area": "Hal"}, "suggested_area"),
     ("di/1_01", {"off_delay_s": 20}, "planned (T14)"),
-    ("ro/xS51_01", {"presets": {}}, "planned"),
+    ("ro/xS51_01", {"counter": True}, "planned (T15)"),
     ("di/1_01", {"bogus": 1}, "bogus"),
     ("ro/xS51_01", {"inverted": True}, "only applies to digital inputs"),
     ("led/1_01", {"device_class": "motion"}, "not supported for led"),
