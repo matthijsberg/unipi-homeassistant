@@ -40,13 +40,16 @@ def test_digital_input_discovery(discovered, mod):
     assert c["origin"]["sw"] == mod.SCRIPT_VERSION
 
 
-def test_inverted_input_swaps_payloads(bridge, mod):
-    from conftest import run, drain
+def test_inverted_input_uses_plain_payloads_and_logical_state(bridge, mod):
+    """T11 (deliberate change): NO/NC inversion is applied to the VALUE, not to the HA payload mapping."""
+    from conftest import run, drain, fx
     bridge.config.inputs = {"1_01": {"inverted": True}}
     run(bridge, bridge.perform_discovery_and_mqtt_subscribe())
     msgs = dict(drain(bridge.websocket_to_mqtt_queue))
     c = json.loads(msgs[f"{PFX}/binary_sensor/{DN}/di_1_01/config"])
-    assert (c["payload_on"], c["payload_off"]) == ("OFF", "ON")
+    assert (c["payload_on"], c["payload_off"]) == ("ON", "OFF")
+    physical = fx("di", "1_01")
+    assert msgs[f"unipi/{DN}/di/1_01/state"] == ("OFF" if physical == 1 else "ON")  # logical = inverted
 
 
 def test_relay_switch_discovery(discovered):

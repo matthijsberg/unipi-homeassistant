@@ -8,8 +8,12 @@
     "keepalive": 60,
     "discovery_prefix": "homeassistant"
   },
-  "websocket": { "url": "ws://127.0.0.1:8080/ws" },
-  "unipi_http": { "url": "http://127.0.0.1:8080/rest/all" },
+  "websocket": {
+    "url": "ws://127.0.0.1:8080/ws"
+  },
+  "unipi_http": {
+    "url": "http://127.0.0.1:8080/rest/all"
+  },
   "logging": {
     "level": "WARNING",
     "file_path": "~/.local/logs/unipi_bridge.log",
@@ -17,7 +21,25 @@
     "backup_count": 3,
     "startup_debug_seconds": 60
   },
-  "extensions": { "check_interval": 60, "max_comm_delay": 10 },
-  "web_server": { "enabled": true, "port": 8088, "allowed_users": [] },
-  "inputs": {}
+  "extensions": {
+    "check_interval": 60,
+    "max_comm_delay": 10
+  },
+  "web_server": {
+    "enabled": true,
+    "port": 8088,
+    "allowed_users": []
+  },
+  "inputs": {},
+  "circuits": {
+    "di/1_01": {
+      "name": "Hallway motion",
+      "device_class": "motion"
+    },
+    "di/1_03": {
+      "name": "Front door contact",
+      "device_class": "door",
+      "inverted": true
+    }
+  }
 }

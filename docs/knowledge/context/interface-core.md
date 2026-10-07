@@ -95,12 +95,19 @@ data:
 
 # 4. Per-circuit configuration **[NEW T11]**
 
-New optional top-level `circuits` object in `config.json`, keyed `"<dev>/<circuit>"`.
-The old `inputs.<circuit>.inverted` keeps working (read as `circuits["di/<circuit>"]`).
+**[IMPLEMENTED T11 — only these options]** New optional top-level `circuits` object in
+`config.json`, keyed `"<dev>/<circuit>"` (aliases `input`/`relay`/`output`/`analogoutput` accepted).
+Supported options: `name`, `device_class` (not for `led`/`ao`/`1wdevice`), `inverted` (only `di`).
+**Every other option below is rejected at start-up with a message naming the circuit and the
+task that will add it** (planned options never fail silently). `area` is *not possible*: Home
+Assistant MQTT discovery only has a per-device `suggested_area`; assign areas in HA.
+`1wdevice/<addr>/<temp|humidity|vdd|vad|vis>` accepts `name`. Entity identity (`unique_id`) never
+depends on `name`. The old `inputs.<circuit>.inverted` keeps working. `local_rules.json` is
+resolved next to the config file (fix K6).
 
 ```jsonc
 "circuits": {
-  "di/2_05":  {"name": "Voordeur beldrukker", "device_class": null, "area": "Hal"},
+  "di/2_05":  {"name": "Voordeur beldrukker", "device_class": null},
   "di/1_01":  {"name": "Hal PIR", "device_class": "motion", "off_delay_s": 20},
   "di/2_03":  {"name": "Achterdeur contact", "device_class": "door", "inverted": true},
   "di/xS30_02": {"name": "Watermeter", "counter": true, "counter_interval_s": 10},

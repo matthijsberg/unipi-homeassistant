@@ -11,10 +11,10 @@ generated: { by: claude-code/claude-opus-5-5, at: 2026-10-07T09:30:00Z }
 |---|---|---|---|---|
 | K1 | `on_mqtt_message` | Every JSON payload on any `/set` is routed to `process_ao_transition`; non-AO devs are rejected there. | JSON commands to relays (pulse/duration) impossible. | T12 |
 | K2 | `websocket_worker_thread` | Holds a command up to 30 s while WS is down, then drops it silently. | Late rings/window moves; a dropped OFF. | T12 (sequencer bypasses queue; OFF priority) |
-| K3 | `publish_discovery_config` | `inputs.inverted` only swaps HA payloads; `device_states` and rules see raw value. | Rules on NC contacts are inverted vs HA. | T11 |
+| K3 | `publish_discovery_config` | `inputs.inverted` only swapped HA payloads; `device_states` and rules saw the raw value. | Rules on NC contacts were inverted vs HA. | **Fixed in T11** (logical inversion at the input edge; parity test proves HA sees the same state) |
 | K4 | `execute_local_action` | Rule `action_transition` is treated as **ms**; MQTT `transition` is **s**. | Confusing; easy misconfiguration. | T17 (document + validate; keep ms for rules, name it `action_transition_ms` alias) |
 | K5 | `handle_dimmer_action` | Default on-level fixed 10 V; `previous_level` lost on restart. | Legacy 5 V lights come on at 10 V first time. | T17 |
-| K6 | `LocalLogicEngine("local_rules.json")` | Relative path → depends on CWD (systemd sets it; manual runs may not). | Rules silently empty when started elsewhere. | T11 (resolve relative to config dir) |
+| K6 | `LocalLogicEngine("local_rules.json")` | Relative path → depends on CWD (systemd sets it; manual runs may not). | Rules silently empty when started elsewhere. | **Fixed in T11** (resolved next to the config file) |
 | K7 | `process_payload` | Bare JSON integer becomes `{"brightness": n}` for any device. | Odd for relays. | T12 (route by dev first) |
 | K8 | Env | S103 bridge uses MQTT user `<MQTT_USER_S103>`. | Shared credential; can't tell clients apart in broker ACL/logs. | Recommendation: dedicated users `unipi-s103`, `unipi-l513` (T03 note, human) |
 | K9 | Env | `gh` token on S103 expired. | Cannot push. | T00 (human) |
