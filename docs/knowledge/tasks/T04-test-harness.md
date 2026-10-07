@@ -4,7 +4,7 @@ id: T04
 title: "Create a pytest harness with characterization tests of current behaviour"
 description: "tests/ runs offline on any machine, with fakes for MQTT, evok WebSocket and REST, and pins down today's behaviour of discovery, state publishing, commands, AO fades and local rules."
 phase: 0
-task_status: todo
+task_status: done
 depends_on: [T02]
 risk: low
 human_gate: false
@@ -66,5 +66,10 @@ Delete `tests/`.
 (no deploy needed: runtime code unchanged — verify with `git diff v2.0.0 v2.1.0 -- hass-unipi.py` empty).
 
 # Evidence
+- 2026-10-07: `/home/unipi/unipi-homeassistant/bin/python -m pytest -q` → **43 passed in ~8 s** (offline: fake MQTT, fake WebSocket, REST patched with the recorded S103 snapshot; runtime-dir files redirected to tmp).
+- Coverage of behaviour pinned: discovery (counts per component, device/availability/LWT, switch/light/sensor/1-wire payloads, inverted inputs, subscribed command topics, initial states), WS→MQTT (dedup, 0.05 deadband boundaries, AO JSON, echo suppression, 1-wire, lists, republish), MQTT→WS (ON/OFF + ack, retained ignored, invalid payload, AO instant/fade/off/out-of-range, payload parsing), local rules (engine, conditions, end-to-end, no fire on republish, dimmer toggle, rules file round-trip).
+- **Mutation sanity (8 deliberate breaks of `hass-unipi.py`, each restored via `git checkout`)**: ack casing, AO scale, digital dedup, retained `/set`, rules-on-republish, dimmer default level, AO min step → all caught on the first run. The analog deadband change (0.05→0.5) **survived** the first version of the tests; boundary cases (+0.04 / +0.1) were added and it is now caught.
+- Two tests pin *known gaps on purpose* and must be updated by the task that fixes them: JSON `/set` to a relay is ignored (K1 → T12), dimmer default level is a fixed 10 V (K5 → T17).
+- Fixtures: `tests/fixtures/s103_rest_all.json` (S103 snapshot), `l513_evok2_rest_all.json` (reference only; evok v2 shapes).
 
 # Open questions

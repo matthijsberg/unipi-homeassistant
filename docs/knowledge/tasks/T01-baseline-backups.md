@@ -4,7 +4,7 @@ id: T01
 title: "Take verified baseline backups and confirm what the L513 runs (no L513 access needed)"
 description: "A checksum-verified baseline backup of the S103 exists on the S103 and off-box, the L513 baseline is documented from the downloaded script copies plus read-only REST/MQTT snapshots, and the L513 rollback is the physically swapped SD card."
 phase: 0
-task_status: in_progress
+task_status: done
 depends_on: []
 risk: low
 human_gate: true
@@ -55,7 +55,7 @@ This task *is* the backup.
 
 # Acceptance checks
 - `sha256sum -c SHA256SUMS` passes in the backup folder (done: 0 failures).
-- Off-box copy exists and its checksums match (**pending**).
+- Off-box copy exists and its checksums match (**done**: archive delivered to Matthijs' Mac via the app session).
 - Inventory unknowns updated; K12 resolved or turned into a T20 check.
 
 # Rollback
@@ -78,6 +78,7 @@ Inventory, K12, backup runbook (L513 rollback = SD swap), `/log.md`.
   **Conclusion (high confidence, not proof): stale leftovers from earlier config versions.**
   T20's capture must confirm they never change.
 
+- Off-box copy: `20261007T113014Z-baseline-s103.tar.gz` (708,531 bytes, 13 files) handed over in the app session on 2026-10-07; sha256 `bf93c49b5a6814366cd1810e22c1ab0afa177f775fe1b8f1d8b4b825c8933932` (Matthijs can verify with `shasum -a 256`). Contains secrets.
+
 # Open questions
-- Where should off-box copies of backups go (PC/NAS path, or hand-over in the app)?
-- Confirm L513 boots from a removable µSD (human, before T30).
+- Confirm L513 boots from a removable µSD (human, before T30) — tracked in T30.
