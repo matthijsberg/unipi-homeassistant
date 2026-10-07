@@ -85,7 +85,7 @@ else:
     print("Required libraries check passed.")
 
 # --- Script Version ---
-SCRIPT_VERSION = "2.2.0-rc3"
+SCRIPT_VERSION = "2.2.0-rc4"
 
 # --- Constants ---
 # Last discovered device name, so the MQTT last-will can use the device's own
@@ -615,6 +615,7 @@ class UnipiBridge:
             logger=self.logger,
         )
         self.events.subscribe(INPUT_CHANGED, self._on_input_for_sequencer)
+        self.events.subscribe(OUTPUT_CHANGED, self._on_output_for_sequencer)
 
         # MQTT Client
         api_version = getattr(mqtt, "CallbackAPIVersion", None)
@@ -1402,6 +1403,11 @@ class UnipiBridge:
 
     def _on_input_for_sequencer(self, dev, circuit, value, subkey=None, **_):
         if subkey is None and dev in ("do", "ro", "led"):
+            self.sequencer.note_state(dev, circuit, value)
+
+    def _on_output_for_sequencer(self, dev, circuit, value, origin=None, **_):
+        # Plain ON/OFF commands (mqtt/rule) are known to us even if evok never pushes this output.
+        if origin != "sequence" and dev in ("do", "ro", "led"):
             self.sequencer.note_state(dev, circuit, value)
 
     async def _sequencer_watchdog(self) -> None:

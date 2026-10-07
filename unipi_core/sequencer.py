@@ -169,6 +169,14 @@ class OutputSequencer:
         self._tasks: dict[Key, asyncio.Task] = {}
         self._on_since: dict[Key, float] = {}
         self._needs_failsafe: set[Key] = set()
+        self._raw_write = write
+        # Every physical write the sequencer makes also feeds the watchdog: evok does not push all
+        # outputs (e.g. front-panel LEDs) over its WebSocket, so we must not depend on that.
+        self.write = self._write_tracked
+
+    async def _write_tracked(self, dev: str, circuit: str, value: int) -> None:
+        await self._raw_write(dev, circuit, value)
+        self.note_state(dev, circuit, value)
 
     # ---- public API ----------------------------------------------------------------------------
     def is_running(self, dev: str, circuit: str) -> bool:

@@ -167,3 +167,31 @@ def test_valid_doorbell_config_loads(mod):
                                                   "ring_front": {"label": "Bel voor (3x)", "pulse": {"count": 3}}}}})
     c = cfg.circuits["ro/2_02"]
     assert c.limits().max_count == 6 and c.limits().watchdog and set(c.presets) == {"ring_back", "ring_front"}
+
+
+# ---- found on real hardware: evok does not push LED states over its WebSocket -------------------------
+def test_watchdog_works_for_outputs_evok_never_pushes(rig, fast_sleep):
+    """A plain ON command must arm the max-on watchdog even though no WS echo ever arrives."""
+    rig.device_states["led_1_01"] = 1          # what the REST read-back will confirm
+    send(rig, "ON")
+    settle(rig, 0.2)                           # let the verified ON/ack path finish
+    drain(rig.mqtt_to_websocket_queue)
+    run(rig, rig.ft.advance_to(5.5)); run(rig, rig.sequencer.watchdog_tick())      # max_on_s is 5 in this rig
+    assert [v for _, v in rig.ws_writes()] == [0]                                  # forced OFF, no WS push involved
+
+
+def test_long_ring_train_does_not_trip_the_watchdog(rig, mod):
+    """Sequence acks keep HA 'ON' for the whole train; the watchdog must follow the real coil, not that ack."""
+    configure(rig, mod, max_on_s=1, max_count=10, failsafe_off=True)
+    send(rig, {"pulse": {"count": 6, "on_ms": 100, "off_ms": 250}})              # 2.1 s total, each pulse 0.1 s
+    for t in (0.5, 1.0, 1.5, 2.0):
+        run(rig, rig.ft.advance_to(t)); run(rig, rig.sequencer.watchdog_tick())
+    run(rig, rig.ft.advance_to(3))
+    assert [v for _, v in rig.ws_writes()] == [1, 0] * 6                          # all six rings, never interrupted
+
+
+def test_sequencer_writes_arm_and_clear_the_watchdog(rig):
+    run(rig, rig.sequencer.write("led", "1_01", 1))
+    assert ("led", "1_01") in rig.sequencer._on_since
+    run(rig, rig.sequencer.write("led", "1_01", 0))
+    assert ("led", "1_01") not in rig.sequencer._on_since
