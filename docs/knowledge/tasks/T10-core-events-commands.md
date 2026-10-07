@@ -60,6 +60,13 @@ place to *send* output commands and one place to *observe* state changes (ADR-00
 # Rollback
 `tools/rollback.sh v2.1.0`.
 
+# Live result (S103, 2026-10-07)
+- `tools/deploy.sh v2.2.0-rc1` (legacy mode): preflight → backup `…-pre-v2.2.0-rc1` → restart → `healthcheck OK (version 2.2.0-rc1)`; first use of the deploy tooling for a real code change.
+- Log since restart: 0 tracebacks, 0 non-banner ERROR lines.
+- End-to-end on the front-panel LED `led/1_01` (safe output): MQTT `ON` → live ack `ON`; `OFF` → live ack `OFF`; evok REST confirms `0` at the end. (First attempt of my test script crashed on a script bug; confirmed all LEDs were 0 before retrying.)
+- **Observation (K16)**: the existing read-back verification (0.3/0.8/1.3 s) logged `Verification mismatch for led/1_01` on 3 of 4 commands: Evok's value for this LED lags the write by >1 s, then the bridge acks correctly "despite verification failure" (ack delayed ≈1.3 s). The verification code is untouched by T10 (diff: only the WS-send line changed) but a live A/B against v2.0.0 was not run.
+- 24 h soak: **pending** (started 14:03Z). Check `grep -c ERROR` on the log and HA availability history before closing T10.
+
 # Feed the elephant
 `/context/code-map.md` (new module rows), `/log.md`.
 
