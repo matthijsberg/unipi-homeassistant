@@ -43,7 +43,7 @@ none in git (system packages); `/context/hardware-inventory.md`, `/log.md`.
 1. Show the exact upgrade list; **🔒 HUMAN** approves (flag `raspi-firmware`: if the human prefers, hold it
    with `apt-mark hold raspi-firmware` and note it).
 2. `sudo apt-get -y upgrade` (never `dist-upgrade`/`full-upgrade`, never a release upgrade).
-3. Reboot; wait for evok, owserver, unitcp, hass-unipi.
+3. Reboot; wait for evok, owserver, unipitcp, hass-unipi.
 4. Verify: kernel version unchanged; `systemctl --failed` empty; `tools/healthcheck.py --fresh`;
    `GET :8080/rest/all` has `device_info`; xS51 extension `last_comm` small; 1-wire sensors present;
    the unit tests; the LED round trip.
