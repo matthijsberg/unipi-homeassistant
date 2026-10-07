@@ -62,6 +62,13 @@ must update the test deliberately and say so in the commit.
 output commands go through `CommandService.send_ws`; all acks pass `mqtt_ack(..., origin=)`.
 Subscribe with `bridge.events.subscribe(kind, callback)`; callbacks take keyword args.
 
+# circuits (T11)
+
+`unipi_core/circuits.py`: `CircuitConfig` (name, device_class, inverted), `canonicalize_circuits`,
+`CircuitRegistry` (`bridge.circuits`: `name()`, `device_class()`, `is_inverted()`, `logical()`).
+Digital-input values are logical from the WS edge on: `device_states`, rules and `input_changed.value`;
+`raw` carries the physical value.
+
 # Tooling (T03)
 
 `tools/{backup.sh,deploy.sh,rollback.sh,healthcheck.py}` — see `tools/README.md`. Deploy = preflight → backup →

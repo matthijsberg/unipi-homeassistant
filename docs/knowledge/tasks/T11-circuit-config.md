@@ -4,7 +4,7 @@ id: T11
 title: "Add per-circuit configuration (names, device classes, areas, logical inversion)"
 description: "config.json accepts an optional circuits object; discovery uses name/device_class/area; inverted inputs publish the logical state; old inputs.<c>.inverted still works."
 phase: 1
-task_status: todo
+task_status: in_progress
 depends_on: [T10]
 risk: medium
 human_gate: false
@@ -68,5 +68,11 @@ Closes G7 and G18 and gives T12–T19 one place to read per-circuit options
 K3/K6 → handled, `/log.md`.
 
 # Evidence
+- 2026-10-07: `pytest -q` → **91 passed** (45 original + 17 T10 + 29 T11). One original test changed **on purpose**: `test_inverted_input_swaps_payloads` → `…uses_plain_payloads_and_logical_state` (the old behaviour is exactly what K3 describes).
+- Implemented: `unipi_core/circuits.py` (model, canonical keys incl. aliases, per-device validity, `CircuitRegistry`); `AppConfig.circuits`; discovery `name` / `device_class` (binary_sensor, sensor, switch; 1-wire sub-key names); logical inversion at the WS edge, in the initial snapshot, in the discovery initial state and in the web NO/NC handlers; rules path next to the config file.
+- **Deviation from the card (research, not guesswork)**: `area` is rejected, not implemented — HA MQTT discovery has `suggested_area` only inside the *device* block (docs checked 2026-10-07); no per-entity area key exists. Also: only options that exist are accepted; planned ones fail with an explicit message (so a setting is never silently ignored). Unknown `device_class` values only log a warning (HA may add classes).
+- Proof that HA sees no change: `test_home_assistant_sees_the_same_state_as_before_t11[0|1]` (old swapped-payload mapping vs new plain payloads, both contact positions).
+- Mutation checks: 9 deliberate breaks; 8 caught immediately, 1 survived (state cache seeded with physical values at start-up) → `test_state_cache_is_seeded_with_logical_values_at_startup` added and verified to kill it.
+- S103 migration note: the live `config.json` has no `inputs`/`circuits`, and `local_rules.json` is `[]`, so nothing is inverted today and no rule changes meaning.
 
 # Open questions

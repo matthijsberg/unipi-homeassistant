@@ -32,6 +32,7 @@ from websockets.protocol import State
 import aiohttp
 from aiohttp import web
 
+from unipi_core.circuits import CircuitConfig, CircuitRegistry, canonicalize_circuits
 from unipi_core.commands import CommandService
 from unipi_core.events import AVAILABILITY, INPUT_CHANGED, OUTPUT_CHANGED, EventBus
 
@@ -78,7 +79,7 @@ else:
     print("Required libraries check passed.")
 
 # --- Script Version ---
-SCRIPT_VERSION = "2.2.0-rc1"
+SCRIPT_VERSION = "2.2.0-rc2"
 
 # --- Constants ---
 # Last discovered device name, so the MQTT last-will can use the device's own
@@ -169,6 +170,13 @@ class AppConfig(BaseModel):
     extensions: ExtensionsConfig = Field(default_factory=ExtensionsConfig)
     web_server: WebServerConfig = Field(default_factory=WebServerConfig)
     inputs: dict[str, dict[str, bool]] = Field(default_factory=dict)
+    # Per-circuit settings keyed "<dev>/<circuit>", see unipi_core/circuits.py
+    circuits: dict[str, CircuitConfig] = Field(default_factory=dict)
+
+    @field_validator("circuits", mode="before")
+    @classmethod
+    def _canonical_circuit_keys(cls, v):
+        return canonicalize_circuits(v)
 
     model_config = {
         "populate_by_name": True,
@@ -530,7 +538,12 @@ class UnipiBridge:
         self.config_path = config_path
         self.recorder = recorder
         self.logger = self._setup_logging()
-        self.local_logic = LocalLogicEngine("local_rules.json", self.logger)
+        self.circuits = CircuitRegistry(self.config, self.logger)
+        # local_rules.json lives next to the config file, not in whatever CWD we were started from
+        self.local_logic = LocalLogicEngine(
+            os.path.join(os.path.dirname(os.path.abspath(config_path)), "local_rules.json"),
+            self.logger,
+        )
 
         # State
         self.device_name: str = self._load_cached_device_name()
@@ -1523,7 +1536,7 @@ class UnipiBridge:
             else:
                 value = item.get("value")
                 if dev and circuit and value is not None:
-                    self.device_states[f"{dev}_{circuit}"] = value
+                    self.device_states[f"{dev}_{circuit}"] = self.circuits.logical(dev, circuit, value)
 
         # Discovery
         if self.device_name and device_info:
@@ -2015,7 +2028,7 @@ class UnipiBridge:
             dev_info["configuration_url"] = configuration_url
 
         config = {
-            "name": f"{dev_type} {circuit}",
+            "name": self.circuits.name(dev_type, circuit, f"{dev_type} {circuit}"),
             "unique_id": unique_id,
             "dev": dev_info,
             "origin": {
@@ -2033,27 +2046,14 @@ class UnipiBridge:
         # Type specific config
         match device_type_mapped:
             case "binary_sensor":
-                # Check for NO/NC configuration
-                input_config = self.config.inputs.get(circuit, {})
-                is_inverted = input_config.get("inverted", False)
-
-                if is_inverted:
-                    # Inverted logic: NC (0=ON, 1=OFF). Swap payloads.
-                    config.update(
-                        {
-                            "payload_on": "OFF",
-                            "payload_off": "ON",
-                            "icon": "mdi:electric-switch",
-                        }
-                    )
-                else:
-                    config.update(
-                        {
-                            "payload_on": "ON",
-                            "payload_off": "OFF",
-                            "icon": "mdi:electric-switch",
-                        }
-                    )
+                # NO/NC inversion is applied to the VALUE (logical state), so the payloads are always plain.
+                config.update(
+                    {
+                        "payload_on": "ON",
+                        "payload_off": "OFF",
+                        "icon": "mdi:electric-switch",
+                    }
+                )
 
             case "switch":
                 cmd_topic = self.generate_mqtt_topic_update(dev_type, circuit, "set")
@@ -2127,6 +2127,11 @@ class UnipiBridge:
                         )
                         self.mqtt_subscribe_topics.append(cmd_topic)
 
+        if device_type_mapped in ("binary_sensor", "sensor", "switch"):
+            device_class = self.circuits.device_class(dev_type, circuit, device_type_mapped)
+            if device_class:
+                config["device_class"] = device_class
+
         # Publish Config
         discovery_topic = self.generate_mqtt_topic_discovery(
             dev_type, circuit, "config"
@@ -2135,6 +2140,8 @@ class UnipiBridge:
 
         # Initial State
         initial_value = json_data.get("value")
+        if initial_value is not None and device_type_mapped == "binary_sensor":
+            initial_value = self.circuits.logical(dev_type, circuit, initial_value)
         if initial_value is not None:
             state_topic = config.get("state_topic")
             state_payload = None
@@ -2237,7 +2244,7 @@ class UnipiBridge:
                 )
 
                 config = {
-                    "name": f"1-Wire {circuit} {sensor_meta['name']}",
+                    "name": self.circuits.name("1wdevice", circuit, f"1-Wire {circuit} {sensor_meta['name']}", subkey=sensor_key),
                     "unique_id": unique_id,
                     "dev": dev_info,
                     "origin": {
@@ -2569,7 +2576,10 @@ class UnipiBridge:
                     self.recorder.record_ws_to_mqtt(json_data, generated_mqtt_messages)
 
             elif "value" in json_data:
-                raw_value = json_data["value"]
+                phys_value = json_data["value"]
+                # NO/NC: from here on a digital input carries its LOGICAL value (state, rules, events)
+                raw_value = self.circuits.logical(dev, circuit, phys_value)
+                logic_data = json_data if raw_value is phys_value else {**json_data, "value": raw_value}
 
                 device_key = f"{dev}_{circuit}"
                 if dev in ("temp", "humidity", "vdd", "vad", "vis") and f"1wdevice_{circuit}_{dev}" in self.device_states:
@@ -2604,7 +2614,7 @@ class UnipiBridge:
                     dev=dev,
                     circuit=circuit,
                     value=raw_value,
-                    raw=raw_value,
+                    raw=phys_value,
                     ts=time.time(),
                     source="republish" if force else "ws",
                     subkey=None,
@@ -2613,7 +2623,7 @@ class UnipiBridge:
                 # --- Local Logic Engine ---
                 # Not on republish: nothing changed, so rules must not fire.
                 if not force:
-                    local_actions = self.local_logic.evaluate(json_data, self.device_states)
+                    local_actions = self.local_logic.evaluate(logic_data, self.device_states)
                     for action in local_actions:
                         self.execute_local_action(action)
 
@@ -3797,13 +3807,14 @@ class UnipiBridge:
             # Check for both "input" and "di" device types
             if dev in ["input", "di"] and circuit:
                 # Check current config
-                input_config = self.config.inputs.get(circuit, {})
-                inverted = input_config.get("inverted", False)
+                inverted = self.circuits.is_inverted(dev, circuit)
 
                 # Get current value (state), trying both prefixes
                 current_val = self.device_states.get(f"{dev}_{circuit}")
                 if current_val is None and dev == "input":
                     current_val = self.device_states.get(f"di_{circuit}")
+                # device_states holds the logical value; this screen shows the physical contact state
+                current_val = self.circuits.logical(dev, circuit, current_val, inverted=inverted)
 
                 inputs.append(
                     {
@@ -3834,6 +3845,8 @@ class UnipiBridge:
                 return web.json_response(
                     {"error": "Invalid 'inverted' value"}, status=400
                 )
+
+            old_inverted = self.circuits.is_inverted("di", circuit)
 
             # Update config
             if circuit not in self.config.inputs:
@@ -3886,7 +3899,10 @@ class UnipiBridge:
                 # record permanently (though it might be fine)
                 item_to_publish = target_item.copy()
                 if current_val is not None:
-                    item_to_publish["value"] = current_val
+                    # device_states holds the LOGICAL value (old setting); discovery expects the physical one
+                    item_to_publish["value"] = self.circuits.logical(
+                        dev, circuit, current_val, inverted=old_inverted
+                    )
 
                 # HA Update Strategy:
                 # To force HA to accept the payload inversion (NO->NC) on an existing entity,
@@ -3910,7 +3926,9 @@ class UnipiBridge:
                 state_topic = self.generate_mqtt_topic_update(
                     dev_type, circuit, "state"
                 )
-                final_val = item_to_publish.get("value")
+                final_val = self.circuits.logical(dev_type, circuit, item_to_publish.get("value"))
+                if final_val is not None:
+                    self.device_states[f"{dev_type}_{circuit}"] = final_val
                 try:
                     state_payload = (
                         "ON"
