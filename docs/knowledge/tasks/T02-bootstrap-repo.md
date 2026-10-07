@@ -4,7 +4,7 @@ id: T02
 title: "Import the live bridge into GitHub as baseline v2.0.0, with secret guard"
 description: "GitHub main contains exactly the live S103 code (2026092501) plus this knowledge bundle, example config and a pre-commit secret guard; tag v2.0.0 exists."
 phase: 0
-task_status: todo
+task_status: done
 depends_on: [T00, T01]
 risk: low
 human_gate: false
@@ -88,5 +88,9 @@ Delete the tag/release and revert the merge commit; nothing live was touched.
 `/log.md`; `/context/code-map.md` sources → add `resource` to the tagged file on GitHub.
 
 # Evidence
+- 2026-10-07: PR #2 merged, tag `v2.0.0` + GitHub Release. `git show v2.0.0:hass-unipi.py | sha256sum` = `dd4afedae96d…` = live.
+- No `config.json`/`local_rules`/`traffic_log` tracked; pre-commit blocked a planted password; both live MQTT passwords absent from `git log --all -p`.
+- Deviations: `cleanup_ghosts.py` NOT imported (hard-coded broker credentials; kept in the baseline backup; T41 builds a credential-free tool). Old config JSON not committed (default); example with 3 neutral entries instead. `pii_scan.py` allow-lists `10.255.255.255` (routing probe in the live script) so the baseline stays byte-identical.
+- Note: the repo root still has the 2025 `unipi_mqtt.py` and `connection_test.py` (pre-existing, unrelated to live code) — candidates for removal in a later cleanup.
 
 # Open questions
