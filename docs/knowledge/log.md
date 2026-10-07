@@ -9,4 +9,5 @@
 * **Mistake logged**: while testing ignore rules I ran `rm config.json` on a *tracked* placeholder file in the clone; restored with `git checkout -- config.json`.
 * **T01 (S103 side) done, off-box copy pending**: baseline backup verified (see T01 Evidence). Matthijs: L513 needs no access — its swap SD card is the backup; its script runs as a root service at boot. L513 baseline taken read-only (REST + retained MQTT). K12 analysed: very likely stale retained topics. Plan branch pushed, PR opened (matthijsberg/unipi-homeassistant#1).
 * **T02 done**: baseline `v2.0.0` released (byte-identical to live `2026092501`). PR #1 (plan) and #2 (baseline) merged. Found and kept out of git: `cleanup_ghosts.py` with hard-coded credentials (security note: that file still exists in the runtime dir on the S103).
-* **Next**: T01 off-box copy (human), then T03 (deploy/backup/rollback tooling) and T04 (tests); T20 (capture legacy contract) can start in parallel.
+* **T01 closed**: backup archive delivered to Matthijs' Mac (checksum recorded in T01). **T04 done**: 43 offline characterization tests, mutation-checked (8 breaks; 1 initially survived → boundary tests added).
+* **Next**: T03 (deploy/backup/rollback tooling — restarts the live S103 service twice); T20 (capture legacy contract) can start in parallel.

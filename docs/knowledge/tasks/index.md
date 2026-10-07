@@ -6,10 +6,10 @@ gates (a goldfish prepares, Matthijs decides/acts). Update `task_status` here **
 # Phase 0 — Safety net (no behaviour change)
 
 * [T00 Restore GitHub push access](T00-github-access.md) - 🔒 · low · deps: – · **done 2026-10-07**
-* [T01 Baseline backups + what really runs on the L513](T01-baseline-backups.md) - 🔒 · low · deps: – · **in progress** (off-box copy pending)
+* [T01 Baseline backups + what really runs on the L513](T01-baseline-backups.md) - 🔒 · low · deps: – · **done 2026-10-07** (µSD confirmation moved to T30)
 * [T02 Import live bridge as v2.0.0 + secret guard](T02-bootstrap-repo.md) - low · deps: T00, T01 · **done 2026-10-07 (v2.0.0)**
 * [T03 Backup/deploy/rollback/health tooling](T03-deploy-rollback-tooling.md) - medium · deps: T02 · todo
-* [T04 Test harness + characterization tests](T04-test-harness.md) - low · deps: T02 · todo
+* [T04 Test harness + characterization tests](T04-test-harness.md) - low · deps: T02 · **done 2026-10-07 (43 tests)**
 
 Milestone **v2.1.0** = T03 + T04 merged (runtime code identical to v2.0.0).
 

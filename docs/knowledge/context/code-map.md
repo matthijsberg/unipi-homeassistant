@@ -47,6 +47,14 @@ at tag `v2.0.0`. **Goldfish: re-grep the symbol, never trust a line number blind
 | Web UI/API | `setup_web_server` (3612) + handlers; UI `web/index.html` (Blockly) | T17 Blockly blocks |
 | Entrypoint | `__main__` (3909): `--config`, `--record` | T18 `--mode` override optional |
 
+# Tests
+
+`tests/` (pytest, offline). Run: `/home/unipi/unipi-homeassistant/bin/python -m pytest -q`.
+`conftest.py` provides `bridge` (UnipiBridge with FakeMqtt/FakeWebSocket, REST patched with
+`tests/fixtures/s103_rest_all.json`), `discovered` (after initial discovery), `fast_sleep`,
+`settle()`, `drain()`, `fx()`. Every new task adds tests here; a change to a pinned behaviour
+must update the test deliberately and say so in the commit.
+
 # Target module layout (introduced gradually, never big-bang)
 
 ```
