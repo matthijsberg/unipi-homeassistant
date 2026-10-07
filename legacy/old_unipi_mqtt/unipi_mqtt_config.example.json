@@ -1,0 +1,10 @@
+[
+  {"circuit": "1_01", "description": "Hallway PIR", "dev": "input", "device_delay": 20,
+   "device_normal": "no", "unipi_value": 0, "unipi_prev_value_timstamp": 0,
+   "state_topic": "unipi/example/hall/motion"},
+  {"circuit": "2_05", "description": "Front door bell button", "dev": "input",
+   "handle_local": {"type": "bel", "trigger": "on", "rings": 3, "output_dev": "output", "output_circuit": "2_02"},
+   "device_delay": 0, "device_normal": "no", "state_topic": "unipi/example/frontdoor/bell"},
+  {"circuit": "1_01", "description": "Hallway lux", "dev": "ai", "device_normal": "no",
+   "interval": 60, "state_topic": "unipi/example/hall/lux"}
+]

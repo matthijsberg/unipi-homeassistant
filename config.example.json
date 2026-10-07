@@ -1,0 +1,23 @@
+{
+  "mqtt": {
+    "broker": "<BROKER_IP>",
+    "port": 1883,
+    "username": "<MQTT_USER>",
+    "password": "<MQTT_PASSWORD>",
+    "topic": "unipi",
+    "keepalive": 60,
+    "discovery_prefix": "homeassistant"
+  },
+  "websocket": { "url": "ws://127.0.0.1:8080/ws" },
+  "unipi_http": { "url": "http://127.0.0.1:8080/rest/all" },
+  "logging": {
+    "level": "WARNING",
+    "file_path": "~/.local/logs/unipi_bridge.log",
+    "max_bytes": 5242880,
+    "backup_count": 3,
+    "startup_debug_seconds": 60
+  },
+  "extensions": { "check_interval": 60, "max_comm_delay": 10 },
+  "web_server": { "enabled": true, "port": 8088, "allowed_users": [] },
+  "inputs": {}
+}

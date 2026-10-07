@@ -1,16 +1,16 @@
 [Unit]
-Description=Hass Unipi MQTT Bridge Service
-After=network.target
+Description=My Hass Unipi Python Script Service
+Wants=network-online.target
+After=network-online.target evok.service
+# Never stop retrying, however often it restarts
+StartLimitIntervalSec=0
 
 [Service]
-# Replace 'pi' with the actual user running the script if different
-User=pi
-# Set the working directory to the root of the cloned repository
-WorkingDirectory=/home/pi/unipi-homeassistant
-# Execute the script using the python from the virtual environment
-ExecStart=/home/pi/unipi-homeassistant/.venv/bin/python /home/pi/unipi-homeassistant/hass-unipi.py
-Restart=on-failure
-RestartSec=5
+User=unipi
+WorkingDirectory=/home/unipi/unipi-homeassistant/scripts
+ExecStart=/home/unipi/unipi-homeassistant/bin/python /home/unipi/unipi-homeassistant/scripts/hass-unipi.py
+Restart=always
+RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
