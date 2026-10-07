@@ -4,7 +4,7 @@ id: T10
 title: "Introduce EventBus and CommandService (pure refactor, no behaviour change)"
 description: "unipi_core/events.py and unipi_core/commands.py exist; hass-unipi.py emits input_changed/output_changed/availability events and routes all outputs through CommandService; all T04 tests still pass unchanged."
 phase: 1
-task_status: todo
+task_status: in_progress
 depends_on: [T04]
 risk: medium
 human_gate: false
@@ -64,5 +64,9 @@ place to *send* output commands and one place to *observe* state changes (ADR-00
 `/context/code-map.md` (new module rows), `/log.md`.
 
 # Evidence
+- 2026-10-07: `pytest -q` → **62 passed** (45 existing tests **unmodified** + 17 new in `tests/test_events_commands.py`). Only test-infrastructure change: `conftest.py` puts the repo root on `sys.path` so `hass-unipi.py` can import `unipi_core` (as when run from its directory).
+- Code: `unipi_core/events.py` (EventBus: sync dispatch when on the loop thread or loop idle, `call_soon_threadsafe` from foreign threads, subscriber exceptions isolated), `unipi_core/commands.py` (`send_ws`, `set_digital`, `transition`). Hooks in `hass-unipi.py`: all 7 WS-command call sites + 4 `mqtt_ack` origins routed through `CommandService`; `INPUT_CHANGED` (generic + 1-wire sub-keys, source `ws|republish`), `OUTPUT_CHANGED` (from `mqtt_ack`, origin `mqtt|rule|fade`), `AVAILABILITY`.
+- Mutation checks (4 deliberate breaks of new code, all caught; one mutation of mine was initially invalid because it narrowed `except` to the very exception the test raises — redone with `KeyError`).
+- Deliberate non-change recorded as **K15**: AO fade steps still use a *blocking* `queue.put` on the event-loop thread (`send_ws(block=True)`) exactly like before. If the WS queue is full this can stall the loop; T12's sequencer replaces this path.
 
 # Open questions
