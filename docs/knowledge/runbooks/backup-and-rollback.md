@@ -37,6 +37,12 @@ A backup that exists only on the box being changed **does not count**.
 3. HA side: discovery is retained; after rollback the bridge republishes on start. Entities
    that only exist in the newer version show *unavailable* — harmless.
 
+# L513 backup policy
+
+No network backup of the L513 (decision 2026-10-07): the **old SD card is the backup**. It is
+never written to; the upgrade uses a new card. Keep the old card labelled until T42 + 30 days.
+Reference copies of the old script/config live in the S103 baseline backup.
+
 # Rollback — L513 before cutover is accepted (T31–T33)
 
 1. Power down the L513 (doorbell + wall switches go down).

@@ -51,6 +51,7 @@ is reconstructed from code and retained messages; HA's side is unknown.
 5. Save a trimmed capture as `tests/fixtures/legacy_traffic.jsonl` (no secrets) for T23.
 
 # Acceptance checks
+- The 11 retained topics not in the old config (see K12) never change during the 24 h capture (⇒ stale, to be cleared in T41), or are explained;
 - Every legacy topic in the capture appears in the contract; every HA entity in the export
   maps to a topic in the contract.
 - **🔒 HUMAN** reviews and adds `verified: { by: "human:matthijs", at: … }` to

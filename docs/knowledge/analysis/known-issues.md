@@ -20,6 +20,6 @@ generated: { by: claude-code/claude-opus-5-5, at: 2026-10-07T09:30:00Z }
 | K9 | Env | `gh` token on S103 expired. | Cannot push. | T00 (human) |
 | K10 | Repo | GitHub `main` (2025-03-29, 83 KB script) is far behind live (161 KB). Repo is **public**. | History gap; risk of committing secrets/house data. | T02 (secret guard, example config, house config never committed) |
 | K11 | Old script | Plain-text MQTT password hard-coded (`mqtt_pass`). Not present in GitHub history (checked `git log -S`). | Must be redacted before the old script is added to the repo as reference. | T02 |
-| K12 | Inventory | Retained topics show inputs not in the copied old config. | Copy may not be what runs on L513. | T01 |
+| K12 | Inventory | Retained topics show 11 inputs not in the old config copy. | Copy may not be what runs on L513. | **Likely stale leftovers** (T01 evidence: all 28 configured inputs exist; the 12 unconfigured L513 inputs all read 0; extras are typo/case variants). Confirm in T20 capture; clean up in T41. |
 | K13 | Runtime dir | `scripts/` contains ~370 backups (12 MB) + ad-hoc copies, no VCS. | Hard to know what is live. | T02/T03 (repo + tools; runtime dir becomes deploy target only) |
 | K14 | L513 upgrade | evok 3 renames devs/circuits and needs extension (xS30) + 1-wire configured. | Every HA entity and legacy map depends on it. | T30, T31 |

@@ -6,7 +6,7 @@ gates (a goldfish prepares, Matthijs decides/acts). Update `task_status` here **
 # Phase 0 — Safety net (no behaviour change)
 
 * [T00 Restore GitHub push access](T00-github-access.md) - 🔒 · low · deps: – · **done 2026-10-07**
-* [T01 Baseline backups + what really runs on the L513](T01-baseline-backups.md) - 🔒 · low · deps: – · todo
+* [T01 Baseline backups + what really runs on the L513](T01-baseline-backups.md) - 🔒 · low · deps: – · **in progress** (off-box copy pending)
 * [T02 Import live bridge as v2.0.0 + secret guard](T02-bootstrap-repo.md) - low · deps: T00, T01 · todo
 * [T03 Backup/deploy/rollback/health tooling](T03-deploy-rollback-tooling.md) - medium · deps: T02 · todo
 * [T04 Test harness + characterization tests](T04-test-harness.md) - low · deps: T02 · todo

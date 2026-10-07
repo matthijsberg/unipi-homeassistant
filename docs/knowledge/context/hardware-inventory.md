@@ -26,7 +26,7 @@ sources:
 | | **S103** ("new") | **L513** ("old") |
 |---|---|---|
 | IP | <S103_IP> | <L513_IP> |
-| Hostname | `S103-sn2258` | unknown (no SSH access from S103 yet — see T01) |
+| Hostname | `S103-sn2258` | not needed (no login to the L513 is planned; read-only REST/MQTT only) |
 | Hardware | Unipi Neuron S103 (SN 2258) on Raspberry Pi 3B+, + extension **xS51** (Modbus) | Unipi Neuron **L513** (SN 10, 3 boards) + extension **xS30** on UART (`UART_4_4`) |
 | OS / evok | Debian bookworm, **evok 3.0.6.1**, evok-unipi-data 1.1.4 | **evok v2** (inferred from data shape: `input`/`relay` dev names, `neuron` dev, no `device_info`) |
 | Bridge | `hass-unipi.py` v`2026092501` (systemd `hass-unipi.service`, venv `/home/unipi/unipi-homeassistant`) | Old `unipi_mqtt.py` "02.2021.1" (copy in `/home/unipi/scripts/old_unipi_mqtt/` on S103) |
@@ -61,10 +61,15 @@ in [/analysis/known-issues.md](/analysis/known-issues.md)); old script uses user
 `modbus_slave` ×2, `device_info` ×2 (Neuron S103 sn 2258; Extension xS51).
 The 7 front-panel **`led`** circuits are the safe test outputs for pulse/sequence work.
 
+# L513 facts stated by Matthijs (2026-10-07)
+
+- The old script runs as a **root systemd service started at boot**.
+- The script and config copies in `/home/unipi/scripts/old_unipi_mqtt/` are the latest.
+- The L513 rollback is a **swap SD card** (old card kept untouched) — the L513 itself is
+  never backed up over the network. To be physically confirmed before T30.
+
 # Unknowns (resolve in the named task)
 
-- Exact Unipi OS / evok version on L513, storage medium (µSD vs eMMC) → **T01/T30**.
-- Whether the copy of `unipi_mqtt_config.json` on S103 equals the one running on L513 →
-  **T01** (retained topics show inputs not in the copy, e.g. `serre/vleugel_tuin`,
-  `bijkeuken/lekkage-koelkast`, `woonkamer/vleugel_serre`).
+- Exact Unipi OS / evok version on L513 → **T30/T31** (no login before the upgrade); storage medium = removable µSD per Matthijs, confirm physically → **T30**.
+- Whether the 11 retained topics not in the config (e.g. `serre/vleugel_tuin`, `bijkeuken/lekkage-koelkast`) are stale — T01 says very likely yes; confirm in **T20**.
 - What the HA YAML for the old entities looks like → **T20**.
