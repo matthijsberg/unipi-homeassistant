@@ -1,0 +1,10 @@
+# Log
+
+## 2026-10-07
+* **Plan created** by claude-code/claude-opus-5-5 (bundle on branch `plan/legacy-migration`, uncommitted, in `~/src/unipi-homeassistant`). Nothing on either live Unipi was changed.
+* **Decisions by Matthijs**: OKF = Open Knowledge Format (v0.2 used); upgrade L513 to evok 3 ([ADR-001](/decisions/ADR-001-upgrade-l513-to-evok3.md)); legacy behaviour via a separate adapter file behind one setting, with real functions ported to core/HA ([ADR-002](/decisions/ADR-002-legacy-adapter.md)); use existing repo `matthijsberg/unipi-homeassistant` ([ADR-004](/decisions/ADR-004-versioning-and-backups.md)).
+* **Observed (read-only)**: L513 @ .125 runs evok v2 (`input`/`relay`, `neuron` L513 sn 10, xS30 on UART); S103 @ .122 runs evok 3.0.6.1 with bridge `2026092501` (sha256 `dd4afeda…3161`), active since 2026-09-25. GitHub repo is public; `main` last commit 2025-03-29; old MQTT password not in its history. `gh` token on S103 expired. No SSH access S103 → L513. Retained broker topics show legacy inputs not present in the copied old config ([known issue K12](/analysis/known-issues.md)).
+* **T00 done** (Matthijs logged in with a fine-grained token; `gh auth status` OK, push dry-run OK). Matthijs confirmed the L513 script/config copies in `scripts/old_unipi_mqtt/` were downloaded the day before and are current (T01 step 6 diff becomes a quick sanity check; retained-topic mismatch K12 still to be explained).
+* **PII guard built** (`tools/pii_scan.py`, hooks, `.gitignore`, local denylist). Self-tests: blocks synthetic token/e-mail/IP/password, honors `pii-ok`, ignores version strings, catches real local passwords. Decisions: bundle uses placeholders + private overlay `docs/knowledge/local/` (gitignored); commit identity = Matthijs's own e-mail (not recorded in tracked files).
+* **Mistake logged**: while testing ignore rules I ran `rm config.json` on a *tracked* placeholder file in the clone; restored with `git checkout -- config.json`.
+* **Next**: T00 (human: `gh auth login`) and T01 (backups + L513 access).
