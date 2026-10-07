@@ -9,7 +9,7 @@ generated: { by: claude-code/claude-opus-5-5, at: 2026-10-07T09:30:00Z }
 
 # Backup (every change, both boxes)
 
-After T03: `~/src/unipi-homeassistant/tools/backup.sh <label>` — prints the archive path.
+`~/src/unipi-homeassistant/tools/backup.sh <label>` — prints the archive path (tool exists since T03; see `tools/README.md`).
 
 Manual equivalent (use until T03 is done):
 

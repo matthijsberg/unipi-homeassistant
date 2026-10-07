@@ -4,7 +4,7 @@ id: T03
 title: "Add backup, deploy, rollback and health-check scripts"
 description: "tools/backup.sh, tools/deploy.sh, tools/rollback.sh and tools/healthcheck.py exist, are tested on the S103 by redeploying v2.0.0, and auto-rollback works."
 phase: 0
-task_status: todo
+task_status: done
 depends_on: [T02]
 risk: medium
 human_gate: false
@@ -67,5 +67,13 @@ Replace "manual equivalent" notes in the runbooks with the script names; `/log.m
 Tag `v2.1.0` only after T04 is also merged.
 
 # Evidence
+- Tools: `tools/backup.sh`, `deploy.sh`, `rollback.sh`, `healthcheck.py`, `tools/README.md`; `tests/test_healthcheck.py` (regression, mutation-verified). `bash -n` clean (shellcheck not installed; not installed without consent). 45 tests pass.
+- **Live test 1 (S103)** `deploy.sh v2.0.0`: preflight ok → auto backup `…-pre-v2.0.0` → restart → `healthcheck: OK - healthy (version 2026092501)`; 69 s total (≈60 s of that is waiting for the bridge's fresh `startup_error=0`).
+- **Live test 2 — FOUND A REAL BUG.** First run of a release that compiles but crashes at startup: the health check did not detect the crash loop and waited the full 120 s before auto-rollback worked ⇒ ~2 min outage instead of ~25 s. Cause: `systemctl show -p A -p B --value` prints in systemd's *internal* order, not the requested order, so `ActiveState` and `NRestarts` were swapped. Fix: parse `key=value` (`sysd()`); regression test `test_sysd_returns_values_in_requested_order` (fails against the old parsing — mutation-verified).
+- My first "syntax error" test release (`this is not python`) was valid Python (`x is not y`), so preflight correctly accepted it — the test input was wrong, not the tool. It still usefully exercised the crash path.
+- **Live re-tests after the fix**: genuine syntax error → `PREFLIGHT FAILED … nothing was changed`, no backup, no restart, `.deployed_tag` unchanged. Crash-at-startup release → `healthcheck: FAIL - service crash-looping` within seconds → automatic rollback from the pre-deploy backup → `healthy (version 2026092501)`; runtime hash back to `dd4afedae96d`, `.deployed_tag` = `v2.0.0`.
+- Throwaway worktree/branch/tags removed. Backups from the tests remain in `~/backups` (`pre-vtest-*`; they match the retention rule's `pre-v*` pattern only for `pre-v2.0.0`; the `pre-vtest-*` ones are normal rotation).
+- **Not done**: off-box copy is not automated yet — no `backup.offbox_targets` configured (no target reachable from this box). Interim: manual hand-over (T01). Add targets to the runtime `config.json` when available.
+- Service downtime per restart: bridge back `online` within ~15 s; the 70 s is only the verification wait.
 
 # Open questions

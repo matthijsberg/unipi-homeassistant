@@ -55,6 +55,12 @@ at tag `v2.0.0`. **Goldfish: re-grep the symbol, never trust a line number blind
 `settle()`, `drain()`, `fx()`. Every new task adds tests here; a change to a pinned behaviour
 must update the test deliberately and say so in the commit.
 
+# Tooling (T03)
+
+`tools/{backup.sh,deploy.sh,rollback.sh,healthcheck.py}` — see `tools/README.md`. Deploy = preflight → backup →
+install → restart → fresh health check → auto-rollback. Lesson recorded: parse `systemctl show` as
+`key=value`, never with `--value` (ordering).
+
 # Target module layout (introduced gradually, never big-bang)
 
 ```
