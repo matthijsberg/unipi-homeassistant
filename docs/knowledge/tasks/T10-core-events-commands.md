@@ -4,7 +4,7 @@ id: T10
 title: "Introduce EventBus and CommandService (pure refactor, no behaviour change)"
 description: "unipi_core/events.py and unipi_core/commands.py exist; hass-unipi.py emits input_changed/output_changed/availability events and routes all outputs through CommandService; all T04 tests still pass unchanged."
 phase: 1
-task_status: in_progress
+task_status: done
 depends_on: [T04]
 risk: medium
 human_gate: false

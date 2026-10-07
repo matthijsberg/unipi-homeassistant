@@ -4,7 +4,7 @@ id: T11
 title: "Add per-circuit configuration (names, device classes, areas, logical inversion)"
 description: "config.json accepts an optional circuits object; discovery uses name/device_class/area; inverted inputs publish the logical state; old inputs.<c>.inverted still works."
 phase: 1
-task_status: in_progress
+task_status: done
 depends_on: [T10]
 risk: medium
 human_gate: false
@@ -62,6 +62,12 @@ Closes G7 and G18 and gives T12–T19 one place to read per-circuit options
 
 # Rollback
 `tools/rollback.sh v2.2.0-rc1` (config without `circuits` stays valid for both versions).
+
+# Live result (S103, 2026-10-07)
+- `tools/deploy.sh v2.2.0-rc2` → `healthcheck OK (version 2.2.0-rc2)`; 0 ERROR / 0 tracebacks in the log.
+- **HA-visible neutrality proven live**: retained discovery configs captured before (rc1) and after (rc2): 52 topics each, none added/removed, **0 differ beyond `origin.sw`/`sw_version`** (all 52 differ only by the version string).
+- No `circuits`/`inputs` configured on the S103, so nothing is inverted or renamed there; names/inversion are exercised by unit tests only (a live rename was deliberately not done: it would change HA friendly names).
+- Soak: rc1 ran 14:03–15:22 UTC without errors and was superseded by rc2; the 24 h soak counts from rc2 (15:22 UTC) and, at the end of Phase 1, the final rc.
 
 # Feed the elephant
 `/context/interface-core.md` §3/§4 (mark implemented), `/analysis/known-issues.md`
