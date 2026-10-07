@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Blocks commits containing house config, secrets or PII. See tools/pii_scan.py.
+root="$(git rev-parse --show-toplevel)"
+exec python3 "$root/tools/pii_scan.py" --staged
