@@ -71,4 +71,10 @@ interface-core §5 implemented; G12–G14, K4, K5 handled; `/log.md`.
 - **UI**: found that the editor rebuilds every rule from scratch on save (it would have erased any new field and the rule id). Now the full rule is kept on the block and merged on save; new blocks for pulse/toggle, dimmer level+hold, and a per-rule "Runs always / only when HA is unreachable" selector. **The page could not be executed here (no Node/browser)**: verified by a JavaScript parser + structural tests only → *needs a click-through by Matthijs*.
 - Mutation checks: 11 breaks; 10 caught immediately, 1 survivor (disabled rules still evaluated) because my test used a rule that was rejected at runtime anyway → strengthened with a rule that visibly acts when wrongly evaluated → caught.
 
+# Live result (S103, `v2.2.0-rc6`, 2026-10-07)
+- Deployed with `deploy.sh` (healthy). The editor page served by the S103 is the new one.
+- **Real-config rule loading test** (no physical trigger available): a valid `pulse`+preset rule, a valid `toggle` rule and an invalid pulse (count 50 > the circuit's max 6) were put in the live rules file → log: `Local rule 'T17 test: too many rings (invalid)' is DISABLED: pulse not allowed on led/1_01: count 50 outside 1..6`, `Loaded 3 local logic rules.`; the file still contained all three; the bridge's startup-error indicator went to `1` (by design) so `healthcheck` reported FAIL. Original `[]` restored (backup `~/backups/local_rules.json.before-T17-test`), restart: healthy, 0 errors.
+- Consequence recorded: a disabled rule is a *config* error that makes `deploy.sh` treat the release as unhealthy (and roll back, which would not fix a config problem).
+- **Still to do (needs Matthijs at the device)**: (1) click through the rule editor: load, add a pulse/toggle/dimmer rule, set "Runs: only when Home Assistant is unreachable", save, reload the page — values must survive; (2) a real button press that fires a pulse/toggle/dimmer rule; (3) HA-outage test of a `when: ha_offline` rule (stop the HA container or MQTT user) — plus the open question about double-handling in HA automations.
+
 # Open questions
