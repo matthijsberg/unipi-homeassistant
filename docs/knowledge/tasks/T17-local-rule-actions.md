@@ -4,7 +4,7 @@ id: T17
 title: "Add pulse and toggle local-rule actions and a configurable dimmer level"
 description: "Local rules can ring a bell (pulse via the sequencer), toggle a digital output, and dimmer rules use action_value as default on-level; the Blockly editor supports all three."
 phase: 1
-task_status: todo
+task_status: in_progress
 depends_on: [T12]
 risk: medium
 human_gate: false
@@ -64,5 +64,17 @@ Restore `local_rules.json` from backup; `tools/rollback.sh <previous rc>`.
 interface-core §5 implemented; G12–G14, K4, K5 handled; `/log.md`.
 
 # Evidence
+- 2026-10-07: `pytest -q` → **205 passed** (+ 37 T17 rule tests, 14 web-UI static tests). One old test adapted on purpose: after a sequence the state cache already says OFF (output-state tracking), so the "publishing is normal again" check now uses a real change.
+- **Scope changed by Matthijs** (ADR-005): T14/T16 dropped to HA; T17 expanded: `when: always|ha_offline`, validation against circuit limits, rules that fail validation are **disabled but kept**, dimmer level persistence (K5), `hold` switch, tracked output state so `toggle` works for outputs evok never pushes.
+- Rule actions: `set` (unchanged), `toggle`, `pulse` (inline `action_pulse` or `action_preset`, timed presets too, through the sequencer so limits/cancel/fail-safe apply), `dimmer` (switch-on level in `action_value`, remembered in `local_rules_state.json` next to the rules, `dimmer_hold`).
+- `when: ha_offline` acts only if `homeassistant/status` is not `online` **or** the MQTT link is down (4 cases tested, incl. "HA said online but MQTT is down").
+- **UI**: found that the editor rebuilds every rule from scratch on save (it would have erased any new field and the rule id). Now the full rule is kept on the block and merged on save; new blocks for pulse/toggle, dimmer level+hold, and a per-rule "Runs always / only when HA is unreachable" selector. **The page could not be executed here (no Node/browser)**: verified by a JavaScript parser + structural tests only → *needs a click-through by Matthijs*.
+- Mutation checks: 11 breaks; 10 caught immediately, 1 survivor (disabled rules still evaluated) because my test used a rule that was rejected at runtime anyway → strengthened with a rule that visibly acts when wrongly evaluated → caught.
+
+# Live result (S103, `v2.2.0-rc6`, 2026-10-07)
+- Deployed with `deploy.sh` (healthy). The editor page served by the S103 is the new one.
+- **Real-config rule loading test** (no physical trigger available): a valid `pulse`+preset rule, a valid `toggle` rule and an invalid pulse (count 50 > the circuit's max 6) were put in the live rules file → log: `Local rule 'T17 test: too many rings (invalid)' is DISABLED: pulse not allowed on led/1_01: count 50 outside 1..6`, `Loaded 3 local logic rules.`; the file still contained all three; the bridge's startup-error indicator went to `1` (by design) so `healthcheck` reported FAIL. Original `[]` restored (backup `~/backups/local_rules.json.before-T17-test`), restart: healthy, 0 errors.
+- Consequence recorded: a disabled rule is a *config* error that makes `deploy.sh` treat the release as unhealthy (and roll back, which would not fix a config problem).
+- **Still to do (needs Matthijs at the device)**: (1) click through the rule editor: load, add a pulse/toggle/dimmer rule, set "Runs: only when Home Assistant is unreachable", save, reload the page — values must survive; (2) a real button press that fires a pulse/toggle/dimmer rule; (3) HA-outage test of a `when: ha_offline` rule (stop the HA container or MQTT user) — plus the open question about double-handling in HA automations.
 
 # Open questions

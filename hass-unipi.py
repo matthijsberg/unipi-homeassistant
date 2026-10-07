@@ -32,7 +32,7 @@ from websockets.protocol import State
 import aiohttp
 from aiohttp import web
 
-from unipi_core.circuits import CircuitConfig, CircuitRegistry, canonicalize_circuits
+from unipi_core.circuits import CircuitConfig, CircuitRegistry, canonicalize_circuits, normalize_dev
 from unipi_core.commands import CommandService
 from unipi_core.events import AVAILABILITY, INPUT_CHANGED, OUTPUT_CHANGED, EventBus
 from unipi_core.sequencer import (
@@ -85,7 +85,7 @@ else:
     print("Required libraries check passed.")
 
 # --- Script Version ---
-SCRIPT_VERSION = "2.2.0-rc5"
+SCRIPT_VERSION = "2.2.0-rc6"
 
 # --- Constants ---
 # Last discovered device name, so the MQTT last-will can use the device's own
@@ -373,15 +373,33 @@ class LocalLogicRule(BaseModel):
     action_value: int | float | str | None = None
     action_transition: float | None = None
     action_delay: float | None = None
+    # T17: pulse / toggle / dimmer options and the 'only when Home Assistant is unreachable' switch
+    action_pulse: dict[str, Any] | None = None   # {"count": 3, "on_ms": 100, "off_ms": 250} (on/off optional)
+    action_preset: str | None = None             # name of a preset on the target circuit (pulse or timed)
+    when: str = "always"                         # always | ha_offline
+    dimmer_hold: bool = True                     # False = toggle on the press edge, no hold-to-dim
 
 
 
 class LocalLogicEngine:
-    def __init__(self, rules_file: str, logger: logging.Logger):
+    def __init__(self, rules_file: str, logger: logging.Logger, validator=None):
         self.rules_file = rules_file
         self.logger = logger
+        self.validator = validator            # rule -> error text | None (set by the bridge)
+        self.disabled: dict[str, str] = {}    # rule id -> why it is not evaluated (rules stay in the file)
         self.rules: list[LocalLogicRule] = []
         self.load_rules()
+
+    def revalidate(self) -> None:
+        """Disable (not delete) rules that are invalid for the current circuit configuration."""
+        self.disabled = {}
+        if not self.validator:
+            return
+        for r in self.rules:
+            err = self.validator(r)
+            if err:
+                self.disabled[r.id] = err
+                self.logger.error(f"Local rule '{r.name}' ({r.id}) is DISABLED: {err}")
 
     def load_rules(self) -> None:
         try:
@@ -389,6 +407,7 @@ class LocalLogicEngine:
                 with open(self.rules_file, "r") as f:
                     data = json.load(f)
                     self.rules = [LocalLogicRule(**item) for item in data]
+                self.revalidate()
                 self.logger.info(f"Loaded {len(self.rules)} local logic rules.")
             else:
                 self.logger.info(
@@ -477,6 +496,8 @@ class LocalLogicEngine:
             return actions
 
         for rule in self.rules:
+            if rule.id in self.disabled:
+                continue
             if rule.trigger_dev == msg_dev and rule.trigger_circuit == msg_circuit:
 
                 match = False
@@ -504,6 +525,10 @@ class LocalLogicEngine:
                         "value": rule.action_value,
                         "trigger_value": msg_value,
                         "rule_id": rule.id,
+                        "pulse": rule.action_pulse,
+                        "preset": rule.action_preset,
+                        "when": rule.when,
+                        "hold": rule.dimmer_hold,
                     }
                     if rule.action_transition is not None:
                         action["transition"] = rule.action_transition
@@ -521,6 +546,7 @@ class LocalLogicEngine:
             new_rules: The new list of rules.
         """
         self.rules = new_rules
+        self.revalidate()
         self.save_rules()
         self.logger.info(f"Replaced all rules. Count: {len(self.rules)}")
 
@@ -546,10 +572,12 @@ class UnipiBridge:
         self.logger = self._setup_logging()
         self.circuits = CircuitRegistry(self.config, self.logger)
         # local_rules.json lives next to the config file, not in whatever CWD we were started from
-        self.local_logic = LocalLogicEngine(
-            os.path.join(os.path.dirname(os.path.abspath(config_path)), "local_rules.json"),
-            self.logger,
-        )
+        rules_path = os.path.join(os.path.dirname(os.path.abspath(config_path)), "local_rules.json")
+        # Home Assistant reachability (birth/last-will on <discovery_prefix>/status); None = never seen
+        self.ha_online: bool | None = None
+        self._dimmer_state_file = os.path.join(os.path.dirname(rules_path), "local_rules_state.json")
+        self.dimmer_persist: dict[str, dict[str, Any]] = self._load_dimmer_state()
+        self.local_logic = LocalLogicEngine(rules_path, self.logger, validator=self.validate_rule)
 
         # State
         self.device_name: str = self._load_cached_device_name()
@@ -616,6 +644,7 @@ class UnipiBridge:
         )
         self.events.subscribe(INPUT_CHANGED, self._on_input_for_sequencer)
         self.events.subscribe(OUTPUT_CHANGED, self._on_output_for_sequencer)
+        self.events.subscribe(OUTPUT_CHANGED, self._on_output_track_state)
 
         # MQTT Client
         api_version = getattr(mqtt, "CallbackAPIVersion", None)
@@ -1191,6 +1220,7 @@ class UnipiBridge:
             # Retained copies arrive on every reconnect, which already
             # triggers a republish; only react to a live HA birth message.
             status = message.payload.decode("utf-8", errors="ignore").strip().lower()
+            self.ha_online = status == "online"
             if (
                 status == "online"
                 and not is_retained
@@ -1404,6 +1434,11 @@ class UnipiBridge:
     def _on_input_for_sequencer(self, dev, circuit, value, subkey=None, **_):
         if subkey is None and dev in ("do", "ro", "led"):
             self.sequencer.note_state(dev, circuit, value)
+
+    def _on_output_track_state(self, dev, circuit, value, **_):
+        # Remember what we last commanded (evok does not push every output, e.g. front-panel LEDs)
+        if dev in ("do", "ro", "led"):
+            self.device_states[f"{dev}_{circuit}"] = value
 
     def _on_output_for_sequencer(self, dev, circuit, value, origin=None, **_):
         # Plain ON/OFF commands (mqtt/rule) are known to us even if evok never pushes this output.
@@ -3482,6 +3517,82 @@ class UnipiBridge:
     # Local Logic & Web Server Methods
     # -------------------------------------------------------------------------
 
+    # ---- T17 helpers -----------------------------------------------------------------------------
+    def _ha_reachable(self) -> bool:
+        return self.ha_online is True and self.mqtt_client.is_connected()
+
+    def _toggled_value(self, dev: str, circuit: str) -> int:
+        try:
+            on = int(float(self.device_states.get(f"{dev}_{circuit}", 0))) == 1
+        except (TypeError, ValueError):
+            on = False
+        return 0 if on else 1
+
+    def _rule_spec(self, dev: str, circuit: str, pulse: Any, preset: Any):
+        """Resolve a rule's pulse/preset into a validated sequence spec (raises SequenceRejected)."""
+        payload = {"preset": preset} if preset else {"pulse": pulse}
+        return parse_command(payload, self.circuits.limits(dev, circuit), self.circuits.get(dev, circuit).presets)
+
+    async def _rule_pulse(self, action: dict[str, Any]) -> None:
+        dev, circuit = normalize_dev(action["dev"]), action["circuit"]
+        try:
+            spec = self._rule_spec(dev, circuit, action.get("pulse"), action.get("preset"))
+            await self.sequencer.start(dev, circuit, spec, origin="rule")
+        except SequenceRejected as e:
+            self.logger.warning(f"Rule pulse on {dev}/{circuit} rejected: {e}")
+            self._publish_attributes(dev, circuit, {"last_error": f"rule: {e}"})
+
+    def validate_rule(self, rule: "LocalLogicRule") -> str | None:
+        """None if the rule is usable, else a human-readable reason (it will be disabled, not deleted)."""
+        t = rule.action_type
+        if t not in ("set", "dimmer", "toggle", "pulse"):
+            return f"unknown action_type '{t}'"
+        if rule.when not in ("always", "ha_offline"):
+            return f"'when' must be 'always' or 'ha_offline', got '{rule.when}'"
+        if not rule.trigger_dev or not rule.trigger_circuit:
+            return "the trigger needs a device and a circuit"
+        dev = normalize_dev(rule.action_dev or "")
+        if t in ("toggle", "pulse") and dev not in ("do", "ro", "led"):
+            return f"'{t}' needs a digital output (do/ro/led), got '{rule.action_dev}'"
+        if t == "pulse":
+            if (rule.action_pulse is None) == (rule.action_preset is None):
+                return "pulse needs exactly one of action_pulse / action_preset"
+            try:
+                self._rule_spec(dev, rule.action_circuit, rule.action_pulse, rule.action_preset)
+            except SequenceRejected as e:
+                return f"pulse not allowed on {dev}/{rule.action_circuit}: {e}"
+        if t == "dimmer":
+            if dev != "ao":
+                return "dimmer needs an analog output (ao)"
+            if rule.action_value not in (None, ""):
+                try:
+                    if not 0 < float(rule.action_value) <= 10:
+                        raise ValueError
+                except (TypeError, ValueError):
+                    return f"dimmer level (action_value) must be a voltage in (0, 10], got {rule.action_value!r}"
+            if rule.dimmer_hold and rule.trigger_operator != "any":
+                return ("a dimmer with hold-to-dim must see both button press and release: use trigger_operator "
+                        "'any', or set dimmer_hold to false")
+        return None
+
+    def _load_dimmer_state(self) -> dict[str, dict[str, Any]]:
+        try:
+            with open(self._dimmer_state_file) as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            return {}
+
+    def _save_dimmer_state(self) -> None:
+        data = {rid: {"previous_level": st["previous_level"], "last_direction": st["last_direction"]}
+                for rid, st in self.dimmer_states.items()}
+        tmp = self._dimmer_state_file + ".tmp"
+        try:
+            with open(tmp, "w") as f:
+                json.dump({**self.dimmer_persist, **data}, f)
+            os.replace(tmp, self._dimmer_state_file)
+        except OSError as e:
+            self.logger.warning(f"Could not save dimmer state: {e}")
+
     def execute_local_action(self, action: dict[str, Any]) -> None:
         """Executes a local action generated by the logic engine."""
         try:
@@ -3491,6 +3602,11 @@ class UnipiBridge:
             transition = action.get("transition")
 
             if not dev or not circuit:
+                return
+
+            # "Only when Home Assistant is unreachable": HA is in charge while it is up
+            if action.get("when", "always") == "ha_offline" and self._ha_reachable():
+                self.logger.debug(f"Rule action for {dev}/{circuit} skipped: Home Assistant is reachable")
                 return
 
             # Handle action delay
@@ -3525,6 +3641,11 @@ class UnipiBridge:
             if action_type == "dimmer":
                 self.handle_dimmer_action(action)
                 return
+            if action_type == "pulse":
+                self.loop.create_task(self._rule_pulse(action), name=f"RulePulse-{dev}-{circuit}")
+                return
+            if action_type == "toggle":
+                value = self._toggled_value(dev, circuit)
 
             if value is None:
                 return
@@ -3601,13 +3722,16 @@ class UnipiBridge:
                         return
 
             if cmd_data:
+                if self.sequencer.is_running(dev, circuit):  # a rule overrides a running pulse/timed sequence
+                    self.loop.create_task(self.sequencer.cancel(dev, circuit, "rule action"))
                 self.commands.send_ws(cmd_data["dev"], cmd_data["circuit"], cmd_data["value"])
 
         except Exception as e:
             self.logger.error(f"Error executing local action: {e}")
 
     def handle_dimmer_action(self, action: dict[str, Any]) -> None:
-        """Handles dimmer logic (short press toggle, long press dim)."""
+        """Dimmer rule. hold=True: short press toggles on release, long press dims while held.
+        hold=False: toggles on the press edge only (legacy wall-switch behaviour)."""
         rule_id = action.get("rule_id")
         dev = action.get("dev")
         circuit = action.get("circuit")
@@ -3620,10 +3744,16 @@ class UnipiBridge:
             self.logger.error("Dimmer action is only supported for Analog Outputs (ao).")
             return
 
+        try:
+            level = float(action.get("value")) if action.get("value") not in (None, "") else 10.0
+        except (TypeError, ValueError):
+            level = 10.0
+
         if rule_id not in self.dimmer_states:
+            saved = self.dimmer_persist.get(rule_id, {})
             self.dimmer_states[rule_id] = {
-                "last_direction": 1,
-                "previous_level": 10.0,
+                "last_direction": saved.get("last_direction", 1),
+                "previous_level": saved.get("previous_level", level),   # survives restarts
                 "is_dimming": False,
                 "dimming_task": None,
             }
@@ -3635,13 +3765,18 @@ class UnipiBridge:
         except (ValueError, TypeError):
             return
 
+        if not action.get("hold", True):
+            if trigger_val_int == 1:       # press edge only; the release is ignored
+                self._dimmer_toggle(state, dev, circuit, level)
+            return
+
         if trigger_val_int == 1:
             # Button Pressed
             state["is_dimming"] = False
             # Cancel any existing task just in case
             if state["dimming_task"]:
                 state["dimming_task"].cancel()
-            
+
             state["dimming_task"] = self.loop.create_task(
                 self._dimmer_hold_task(rule_id, dev, circuit),
                 name=f"DimmerHold-{rule_id}"
@@ -3653,31 +3788,34 @@ class UnipiBridge:
                 task.cancel()
                 state["dimming_task"] = None
 
-            current_val_raw = self.device_states.get(f"{dev}_{circuit}", 0)
-            try:
-                current_val = float(current_val_raw)
-            except (ValueError, TypeError):
-                current_val = 0.0
-
             if state.get("is_dimming"):
                 # Was dimming, stop and save state
+                try:
+                    current_val = float(self.device_states.get(f"{dev}_{circuit}", 0))
+                except (ValueError, TypeError):
+                    current_val = 0.0
                 state["last_direction"] *= -1
                 state["previous_level"] = current_val
                 state["is_dimming"] = False
+                self._save_dimmer_state()
             else:
-                # Short press toggle
-                if current_val > 0.0:
-                    # Turn OFF
-                    state["previous_level"] = current_val
-                    target_val = 0.0
-                else:
-                    # Turn ON
-                    target_val = state.get("previous_level", 10.0)
-                    if target_val <= 0.0:
-                        target_val = 10.0
+                self._dimmer_toggle(state, dev, circuit, level)
 
-                self.commands.send_ws(dev, circuit, target_val)
-                self.mqtt_ack(str(int(target_val * 100)), dev, circuit, origin="rule")
+    def _dimmer_toggle(self, state: dict[str, Any], dev: str, circuit: str, level: float) -> None:
+        try:
+            current_val = float(self.device_states.get(f"{dev}_{circuit}", 0))
+        except (ValueError, TypeError):
+            current_val = 0.0
+        if current_val > 0.0:
+            state["previous_level"] = current_val   # remember where it was, then turn OFF
+            target_val = 0.0
+        else:
+            target_val = state.get("previous_level") or level
+            if target_val <= 0.0:
+                target_val = level
+        self.commands.send_ws(dev, circuit, target_val)
+        self.mqtt_ack(str(int(target_val * 100)), dev, circuit, origin="rule")
+        self._save_dimmer_state()
 
     async def _dimmer_hold_task(self, rule_id: str, dev: str, circuit: str) -> None:
         """Async task that handles the dimming loop while button is held."""
@@ -3873,7 +4011,11 @@ class UnipiBridge:
                 del data["id"]
 
             rule = LocalLogicRule(**data)
+            err = self.validate_rule(rule)
+            if err:
+                return web.json_response({"error": err}, status=400)
             self.local_logic.rules.append(rule)
+            self.local_logic.revalidate()
             self.local_logic.save_rules()
             return web.json_response(rule.model_dump())
         except ValidationError as e:
@@ -3891,9 +4033,15 @@ class UnipiBridge:
                 )
 
             new_rules = []
+            errors = []
             for item in data:
                 rule = LocalLogicRule(**item)
+                err = self.validate_rule(rule)
+                if err:
+                    errors.append(f"rule '{rule.name}': {err}")
                 new_rules.append(rule)
+            if errors:  # all or nothing: a broken list never replaces a working one
+                return web.json_response({"error": "; ".join(errors)}, status=400)
 
             self.local_logic.replace_rules(new_rules)
             return web.json_response({"status": "ok", "count": len(new_rules)})

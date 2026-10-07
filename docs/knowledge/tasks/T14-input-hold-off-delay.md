@@ -4,7 +4,7 @@ id: T14
 title: "Add retriggerable off-delay (hold) for pulse-type inputs such as PIRs"
 description: "Inputs with off_delay_s publish ON on the first active edge and OFF only after N seconds without a new active edge; local rules can choose raw or held state."
 phase: 1
-task_status: todo
+task_status: dropped
 depends_on: [T11]
 risk: medium
 human_gate: false
@@ -13,6 +13,9 @@ tags: [core, inputs, motion]
 status: draft
 generated: { by: claude-code/claude-opus-5-5, at: 2026-10-07T09:30:00Z }
 ---
+
+# DROPPED 2026-10-07
+PIR hold is trivial in Home Assistant (`delay_off` on a template binary sensor) and no local rule needs it. Decision by Matthijs (logic that does not need to survive an HA outage lives in HA, ADR-005). Kept for the record; reopen only if a local rule needs it.
 
 # Objective
 Closes G6 (old `device_delay`). Must live in the bridge because local rules and legacy

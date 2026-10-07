@@ -23,15 +23,15 @@ only (disappears in T42) · **DROP** = not carried over.
 | G3 | Relay/output ON/OFF from HA | ✓ (`ro`/`do` switch, read-back verified) | none | CORE (exists); ADAPTER maps old JSON | T21 |
 | G4 | AO brightness 0–255 + `transition` s, interruptible | ✓ 0–1000 scale, ≤ 60 s | scale only | CORE (exists); ADAPTER converts 255↔1000 | T21 |
 | G5 | AO `on` without brightness → error | ON ⇒ 100 % | behaviour differs | CORE keeps 100 %; ADAPTER: `on` w/o brightness ⇒ last non-zero level (better than legacy) | T21 |
-| G6 | **PIR hold** `device_delay` (retriggerable off-delay) | ✗ (publishes raw edges) | Full | **CORE** `off_delay_s` (HA `off_delay` is *not* enough: raw OFF edges overwrite it and local rules/legacy need the held state) | T14 |
+| G6 | **PIR hold** `device_delay` (retriggerable off-delay) | ✗ (publishes raw edges) | Full | **HA** (moved 2026-10-07): binary_sensor `delay_off` / template; local rules need no PIR hold | ~~T14~~ dropped |
 | G7 | NC/NO `device_normal` | ~ `inputs.<c>.inverted` swaps HA payloads only | logical state missing | **CORE** logical inversion (state + rules) | T11 |
 | G8 | **Water-meter counter**: absolute + delta every 10 s | ✗ | Full | **CORE** `counter: true` → `total_increasing` sensor; **HA** utility_meter for deltas; **ADAPTER** computes legacy `counter_delta` | T15, T21 |
-| G9 | Lux from AI: mean over ~60 samples × 200 | raw volts, deadband 0.05 | Full | **CORE** `transform` (scale/offset/round/unit/device_class) + `sampling` (mean, publish interval) | T16 |
-| G10 | Temp/humidity averaging + range check (−55…125 °C, 0…100 %) | raw, deadband 0.05, no range check | Partial | **CORE** `sampling` + `valid_range` (+ optional `reject_values` e.g. 85.0 DS18B20 reset) | T16 |
-| G11 | DS2438 `vis` → lux × 8000 | raw `vis` volts | Partial | **CORE** transform on 1-wire sub-key | T16 |
-| G12 | Local **bel**: button → ring relay N× | ✗ rule actions are only set/dimmer | Full | **CORE** rule `action_type: pulse` (+ Blockly block) | T17 |
-| G13 | Local **dimmer** toggle to fixed level (5/10 V) | ✓ dimmer rule (toggle + hold-to-dim) but default level fixed 10 V | small | **CORE** dimmer default level from `action_value` | T17 |
-| G14 | Local **switch** toggle relay | ✗ | Full | **CORE** rule `action_type: toggle` | T17 |
+| G9 | Lux from AI: mean over ~60 samples × 200 | raw volts, deadband 0.05 | Full | **HA** (moved): `value_template` scaling (volts→lux) / `statistics` averaging | ~~T16~~ dropped |
+| G10 | Temp/humidity averaging + range check (−55…125 °C, 0…100 %) | raw, deadband 0.05, no range check | Partial | **HA** (moved): range checks/averaging in HA templates; core keeps today's 0.05 deadband | ~~T16~~ dropped |
+| G11 | DS2438 `vis` → lux × 8000 | raw `vis` volts | Partial | **HA** (moved): template on the `vis` sensor | ~~T16~~ dropped |
+| G12 | Local **bel**: button → ring relay N× | ✗ rule actions are only set/dimmer | Full | **CORE** local rule `pulse` (works without HA; `when` always/ha_offline) | T17 ✓ |
+| G13 | Local **dimmer** toggle to fixed level (5/10 V) | ✓ dimmer rule (toggle + hold-to-dim) but default level fixed 10 V | small | **CORE** dimmer rule: switch-on level, remembered across restarts, optional hold-to-dim | T17 ✓ |
+| G14 | Local **switch** toggle relay | ✗ | Full | **CORE** local rule `toggle` | T17 ✓ |
 | G15 | Local action → HA state update | ✓ optimistic `mqtt_ack` | none | CORE; ADAPTER mirrors to legacy state topics via `output_changed` events | T10, T21 |
 | G16 | Per-entity `/available` topics | ✓ device-level availability (better) | topic layout | CORE (exists); ADAPTER publishes per legacy topic | T21 |
 | G17 | First-run state sync on WS open | ✓ REST snapshot + republish on HA birth/MQTT reconnect (better) | none | CORE (exists) | – |

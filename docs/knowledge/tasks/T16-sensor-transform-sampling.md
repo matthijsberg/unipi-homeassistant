@@ -4,7 +4,7 @@ id: T16
 title: "Add sensor transform, sampling and validation per circuit"
 description: "ai, temp and 1-wire sub-keys can be scaled (e.g. volts→lux), averaged over a publish interval and range-checked, configured per circuit; defaults keep today's deadband behaviour."
 phase: 1
-task_status: todo
+task_status: dropped
 depends_on: [T11]
 risk: medium
 human_gate: false
@@ -13,6 +13,9 @@ tags: [core, sensors, lux, temperature]
 status: draft
 generated: { by: claude-code/claude-opus-5-5, at: 2026-10-07T09:30:00Z }
 ---
+
+# DROPPED 2026-10-07
+Scaling/averaging/range checks are one-liners in Home Assistant templates and `statistics`; nothing local depends on them. Decision by Matthijs (logic that does not need to survive an HA outage lives in HA, ADR-005). Kept for the record; reopen only if a local rule needs it.
 
 # Objective
 Closes G9, G10, G11 (lux ×200, vis ×8000, averaging, −55…125 °C / 0…100 % validation).
