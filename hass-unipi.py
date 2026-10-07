@@ -85,7 +85,7 @@ else:
     print("Required libraries check passed.")
 
 # --- Script Version ---
-SCRIPT_VERSION = "2.2.0-rc4"
+SCRIPT_VERSION = "2.2.0-rc5"
 
 # --- Constants ---
 # Last discovered device name, so the MQTT last-will can use the device's own
@@ -2459,6 +2459,12 @@ class UnipiBridge:
                         f"WebSocket connection established: {self.config.websocket.url}"
                     )
                     reconnect_delay = 1
+
+                    # Fail-safe FIRST: after a crash an output may still be energised. Try at once; if evok
+                    # is not ready yet the failure is remembered and retried after discovery (below).
+                    await self.sequencer.failsafe_all(
+                        self.circuits.failsafe_keys(), "fail-safe on WebSocket connect"
+                    )
 
                     if not initial_connection_done:
                         self.logger.info(

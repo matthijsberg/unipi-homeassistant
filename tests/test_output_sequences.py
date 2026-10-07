@@ -195,3 +195,37 @@ def test_sequencer_writes_arm_and_clear_the_watchdog(rig):
     assert ("led", "1_01") in rig.sequencer._on_since
     run(rig, rig.sequencer.write("led", "1_01", 0))
     assert ("led", "1_01") not in rig.sequencer._on_since
+
+
+# ---- fail-safe happens as soon as the WebSocket connects (found on hardware: ~18 s after a SIGKILL) ----
+def test_failsafe_off_is_sent_immediately_on_websocket_connect(bridge, mod):
+    import asyncio
+    from websockets.asyncio.server import serve
+    configure(bridge, mod, failsafe_off=True)
+    received = []
+
+    async def evok(ws):
+        async for m in ws:
+            received.append((asyncio.get_running_loop().time(), json.loads(m)))
+
+    async def scenario():
+        async with serve(evok, "127.0.0.1", 0) as server:
+            port = server.sockets[0].getsockname()[1]
+            bridge.config.websocket.url = f"ws://127.0.0.1:{port}/ws"
+            bridge.websocket_connection = None
+            t0 = asyncio.get_running_loop().time()
+            task = asyncio.create_task(bridge.websocket_handler())
+            for _ in range(100):                      # wait up to 1 s; the old code needed >5 s (stabilisation + discovery)
+                if received:
+                    break
+                await REAL_SLEEP(0.01)
+            bridge.should_stop.set(); task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            return received[0][1] if received else None, (received[0][0] - t0) if received else None
+
+    msg, dt = run(bridge, scenario())
+    assert msg == {"cmd": "set", "dev": "led", "circuit": "1_01", "value": 0}
+    assert dt < 1.0
