@@ -431,6 +431,12 @@
                     this.appendDummyInput()
                         .appendField("Rule Name:")
                         .appendField(new Blockly.FieldTextInput("My Rule"), "NAME");
+                    this.appendDummyInput()
+                        .appendField("Runs")
+                        .appendField(new Blockly.FieldDropdown([
+                            ["always (locally, instantly)", "always"],
+                            ["only when Home Assistant is unreachable", "ha_offline"]
+                        ]), "WHEN");
                     this.appendValueInput("TRIGGER")
                         .setCheck("Trigger")
                         .appendField("IF");
@@ -549,9 +555,61 @@
                     this.appendDummyInput()
                         .appendField("Circuit")
                         .appendField(new Blockly.FieldTextInput("1_01"), "CIRCUIT");
+                    this.appendDummyInput()
+                        .appendField("Switch-on level (V)")
+                        .appendField(new Blockly.FieldNumber(10, 0.1, 10), "LEVEL");
+                    this.appendDummyInput()
+                        .appendField("Hold to dim (needs trigger 'any')")
+                        .appendField(new Blockly.FieldCheckbox("TRUE"), "HOLD");
                     this.setOutput(true, "Action");
                     this.setColour(20);
-                    this.setTooltip("Dimmer action (short press toggle, long press dim).");
+                    this.setTooltip("Dimmer: short press toggles to the switch-on level (remembered), long press dims. Untick 'hold' to toggle on the press edge only.");
+                }
+            };
+
+            Blockly.Blocks['unipi_action_pulse'] = {
+                init: function () {
+                    this.appendDummyInput()
+                        .appendField("Pulse output (e.g. doorbell)")
+                        .appendField(new Blockly.FieldDropdown([
+                            ["Relay (ro)", "ro"],
+                            ["Digital Output (do)", "do"],
+                            ["LED", "led"]
+                        ]), "DEV");
+                    this.appendDummyInput()
+                        .appendField("Circuit")
+                        .appendField(new Blockly.FieldTextInput("1_01"), "CIRCUIT");
+                    this.appendDummyInput()
+                        .appendField("Rings")
+                        .appendField(new Blockly.FieldNumber(3, 1, 100), "COUNT")
+                        .appendField("on (ms)")
+                        .appendField(new Blockly.FieldNumber(100, 20), "ON_MS")
+                        .appendField("off (ms)")
+                        .appendField(new Blockly.FieldNumber(250, 50), "OFF_MS");
+                    this.appendDummyInput()
+                        .appendField("or preset name (overrides the numbers)")
+                        .appendField(new Blockly.FieldTextInput(""), "PRESET");
+                    this.setOutput(true, "Action");
+                    this.setColour(20);
+                    this.setTooltip("Switches the output on and off N times. Limits come from the circuit's config; a rule that exceeds them is disabled.");
+                }
+            };
+
+            Blockly.Blocks['unipi_action_toggle'] = {
+                init: function () {
+                    this.appendDummyInput()
+                        .appendField("Toggle output")
+                        .appendField(new Blockly.FieldDropdown([
+                            ["Relay (ro)", "ro"],
+                            ["Digital Output (do)", "do"],
+                            ["LED", "led"]
+                        ]), "DEV");
+                    this.appendDummyInput()
+                        .appendField("Circuit")
+                        .appendField(new Blockly.FieldTextInput("1_01"), "CIRCUIT");
+                    this.setOutput(true, "Action");
+                    this.setColour(20);
+                    this.setTooltip("Flips the output (on to off, off to on).");
                 }
             };
 
@@ -565,7 +623,9 @@
                         { "kind": "block", "type": "unipi_trigger" },
                         { "kind": "block", "type": "unipi_condition" },
                         { "kind": "block", "type": "unipi_action" },
-                        { "kind": "block", "type": "unipi_action_dimmer" }
+                        { "kind": "block", "type": "unipi_action_dimmer" },
+                        { "kind": "block", "type": "unipi_action_pulse" },
+                        { "kind": "block", "type": "unipi_action_toggle" }
                     ]
                 },
                 scrollbars: true,
@@ -591,6 +651,11 @@
                     if (block.type !== 'unipi_rule') continue;
 
                     const name = block.getFieldValue('NAME');
+                    const when = block.getFieldValue('WHEN') || 'always';
+                    // Fields this editor has no block for (and the rule id) are carried through unchanged,
+                    // so saving here can never silently erase them.
+                    let base = {};
+                    try { base = block.data ? JSON.parse(block.data) : {}; } catch (e) { base = {}; }
 
                     // Get Trigger
                     const triggerBlock = block.getInputTargetBlock('TRIGGER');
@@ -626,6 +691,9 @@
                     let actionValue = null;
                     let actionTransition = 0;
                     let actionDelay = 0;
+                    let actionPulse = null;
+                    let actionPreset = null;
+                    let dimmerHold = true;
 
                     if (actionBlock.type === 'unipi_action') {
                         actionDev = actionBlock.getFieldValue('DEV');
@@ -637,10 +705,34 @@
                         actionType = "dimmer";
                         actionDev = "ao";
                         actionCircuit = actionBlock.getFieldValue('CIRCUIT');
+                        actionValue = parseFloat(actionBlock.getFieldValue('LEVEL')) || null;
+                        dimmerHold = actionBlock.getFieldValue('HOLD') === 'TRUE';
+                    } else if (actionBlock.type === 'unipi_action_pulse') {
+                        actionType = "pulse";
+                        actionDev = actionBlock.getFieldValue('DEV');
+                        actionCircuit = actionBlock.getFieldValue('CIRCUIT');
+                        const preset = (actionBlock.getFieldValue('PRESET') || '').trim();
+                        if (preset) {
+                            actionPreset = preset;
+                        } else {
+                            actionPulse = {
+                                count: parseInt(actionBlock.getFieldValue('COUNT'), 10),
+                                on_ms: parseInt(actionBlock.getFieldValue('ON_MS'), 10),
+                                off_ms: parseInt(actionBlock.getFieldValue('OFF_MS'), 10)
+                            };
+                        }
+                    } else if (actionBlock.type === 'unipi_action_toggle') {
+                        actionType = "toggle";
+                        actionDev = actionBlock.getFieldValue('DEV');
+                        actionCircuit = actionBlock.getFieldValue('CIRCUIT');
                     }
 
-                    rules.push({
+                    rules.push(Object.assign({}, base, {
                         name: name,
+                        when: when,
+                        action_pulse: actionPulse,
+                        action_preset: actionPreset,
+                        dimmer_hold: dimmerHold,
                         trigger_dev: triggerDev,
                         trigger_circuit: triggerCircuit,
                         trigger_operator: triggerOp,
@@ -652,7 +744,7 @@
                         action_value: actionValue,
                         action_transition: actionTransition,
                         action_delay: actionDelay
-                    });
+                    }));
                 }
 
                 console.log("Saving rules:", rules);
@@ -699,6 +791,8 @@
                         // Create Rule Block
                         const ruleBlock = workspace.newBlock('unipi_rule');
                         ruleBlock.setFieldValue(rule.name, 'NAME');
+                        ruleBlock.setFieldValue(rule.when || 'always', 'WHEN');
+                        ruleBlock.data = JSON.stringify(rule);   // keep the full rule (id, unknown fields) for saving
                         ruleBlock.initSvg();
                         ruleBlock.render();
                         ruleBlock.moveBy(20, y);
@@ -741,6 +835,22 @@
                         let actionBlock;
                         if (rule.action_type === 'dimmer') {
                             actionBlock = workspace.newBlock('unipi_action_dimmer');
+                            actionBlock.setFieldValue(rule.action_circuit, 'CIRCUIT');
+                            actionBlock.setFieldValue(rule.action_value ? String(rule.action_value) : '10', 'LEVEL');
+                            actionBlock.setFieldValue(rule.dimmer_hold === false ? 'FALSE' : 'TRUE', 'HOLD');
+                        } else if (rule.action_type === 'pulse') {
+                            actionBlock = workspace.newBlock('unipi_action_pulse');
+                            actionBlock.setFieldValue(rule.action_dev, 'DEV');
+                            actionBlock.setFieldValue(rule.action_circuit, 'CIRCUIT');
+                            actionBlock.setFieldValue(rule.action_preset || '', 'PRESET');
+                            if (rule.action_pulse) {
+                                actionBlock.setFieldValue(String(rule.action_pulse.count || 3), 'COUNT');
+                                actionBlock.setFieldValue(String(rule.action_pulse.on_ms || 100), 'ON_MS');
+                                actionBlock.setFieldValue(String(rule.action_pulse.off_ms || 250), 'OFF_MS');
+                            }
+                        } else if (rule.action_type === 'toggle') {
+                            actionBlock = workspace.newBlock('unipi_action_toggle');
+                            actionBlock.setFieldValue(rule.action_dev, 'DEV');
                             actionBlock.setFieldValue(rule.action_circuit, 'CIRCUIT');
                         } else {
                             actionBlock = workspace.newBlock('unipi_action');

@@ -99,8 +99,8 @@ def test_state_echo_is_suppressed_while_a_sequence_runs(rig):
     assert [t for t, _ in mqtt_out(rig) if t == "led/1_01/state"] == []
     run(rig, rig.ft.advance_to(9))
     drain(rig.websocket_to_mqtt_queue)
-    rig.process_websocket_message({"dev": "led", "circuit": "1_01", "value": 0})
-    assert [p for t, p in mqtt_out(rig) if t == "led/1_01/state"] == ["OFF"]   # normal again afterwards
+    rig.process_websocket_message({"dev": "led", "circuit": "1_01", "value": 1})   # a real change after the run
+    assert [p for t, p in mqtt_out(rig) if t == "led/1_01/state"] == ["ON"]        # publishing is normal again
 
 
 def test_ws_echo_feeds_the_watchdog_and_it_forces_off(rig):

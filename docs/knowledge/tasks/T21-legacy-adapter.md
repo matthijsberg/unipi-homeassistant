@@ -5,7 +5,7 @@ title: "Implement legacy_adapter.py behind the legacy.enabled switch"
 description: "With legacy.enabled true the bridge serves every legacy topic in the verified contract via core commands/events; with false the module is never imported."
 phase: 2
 task_status: todo
-depends_on: [T12, T14, T15, T16, T17, T20]
+depends_on: [T12, T15, T17, T20]
 risk: high
 human_gate: false
 target_hosts: [dev-only, s103]
@@ -13,6 +13,12 @@ tags: [legacy, adapter]
 status: draft
 generated: { by: claude-code/claude-opus-5-5, at: 2026-10-07T09:30:00Z }
 ---
+
+# Open question (2026-10-07, caused by dropping T14/T16)
+PIR hold (`device_delay`) and lux scaling now live in Home Assistant, so the adapter cannot reproduce the *old* `unipi/<area>/motion`
+and `{"lux": n}` topics by translation alone. Either (a) migrate those HA entities to the discovered ones **before** the L513
+cutover, or (b) let the adapter implement hold/scale itself (breaks "translation-only", but is deleted with the adapter in T42).
+**🔒 HUMAN decision before T21 starts.**
 
 # Objective
 Implements ADR-002: old HA YAML keeps working on the upgraded L513, while all behaviour runs

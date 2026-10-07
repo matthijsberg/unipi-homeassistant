@@ -1,0 +1,22 @@
+[
+  {
+    "name": "Front door bell button -> ring 3x",
+    "when": "always",
+    "trigger_dev": "di", "trigger_circuit": "2_05", "trigger_operator": "eq", "trigger_value": 1,
+    "action_type": "pulse", "action_dev": "ro", "action_circuit": "2_02",
+    "action_pulse": {"count": 3, "on_ms": 100, "off_ms": 300}
+  },
+  {
+    "name": "Hall wall switch -> dimmer (works without Home Assistant)",
+    "when": "always",
+    "trigger_dev": "di", "trigger_circuit": "3_02", "trigger_operator": "any",
+    "action_type": "dimmer", "action_dev": "ao", "action_circuit": "2_03",
+    "action_value": 10, "dimmer_hold": true
+  },
+  {
+    "name": "Kitchen push button -> toggle relay, only while Home Assistant is down",
+    "when": "ha_offline",
+    "trigger_dev": "di", "trigger_circuit": "3_05", "trigger_operator": "eq", "trigger_value": 1,
+    "action_type": "toggle", "action_dev": "ro", "action_circuit": "3_01"
+  }
+]

@@ -128,7 +128,7 @@ resolved next to the config file (fix K6).
 
 Circuit names are placeholders until the L513 evok-3 map exists (T31).
 
-# 5. Local rules **[EXTENDED T17]**
+# 5. Local rules **[IMPLEMENTED T17]**
 
 `local_rules.json` (`LocalLogicRule`) gains `action_type` values:
 
