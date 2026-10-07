@@ -9,3 +9,27 @@ backup/
 
 # Configuration file (if it contains sensitive/local data)
 config.json
+# --- house-specific / secret / generated (never commit) ---
+config.json
+config.*.json
+!config.example.json
+local_rules.json
+local_rules_state.json
+legacy_map.json
+.device_name
+.discovered_presets
+traffic_log*
+*.log
+*.bak*
+backups/
+out/
+.env
+.env.*
+*.pem
+*.key
+__pycache__/
+.pytest_cache/
+.venv/
+
+# private overlay with real IPs/usernames for this deployment
+docs/knowledge/local/
