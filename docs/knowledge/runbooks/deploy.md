@@ -12,7 +12,7 @@ generated: { by: claude-code/claude-opus-5-5, at: 2026-10-07T09:30:00Z }
 `dev/tests` → **S103 shadow instance** (T18) → **S103 live** → **L513** (from T32 on).
 Never deploy to both live boxes in the same hour; soak S103 ≥ 24 h first.
 
-# Steps (after T03)
+# Steps (tools exist since T03; verified live on the S103)
 
 ```bash
 cd ~/src/unipi-homeassistant && git fetch --tags && git status   # clean tree required
