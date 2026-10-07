@@ -4,7 +4,7 @@ id: T12
 title: "Build the output sequencer (pulse trains, timed outputs, limits, fail-safe)"
 description: "A single MQTT JSON message can ring the bell N times with chosen on/off timing or switch an output on for N seconds; limits, cancellation-to-OFF, no-late-execution, watchdog and fail-safe OFF are enforced and tested."
 phase: 1
-task_status: in_progress
+task_status: done
 depends_on: [T11]
 risk: high
 human_gate: false
@@ -100,6 +100,17 @@ would then roll forward again).
 - Timing is proven with a deterministic fake clock (exact write times for 3×100/250 ms = 0, 0.1, 0.35, 0.45, 0.7, 0.8 s; 5 ms write latency does not accumulate drift). **Real-hardware jitter has not been measured yet** (needs deploy; see below).
 - **Mutation checks, 12 safety-oriented breaks** (cancel without OFF, clamp instead of reject, late execution, cumulative drift, watchdog dead, lost fail-safe retry, missing OFF ack, minimum pulse removed, echo suppression removed, fade-path routing, no shutdown fail-safe, plain command not cancelling): 10 caught at once; **2 survivors** were then analysed: the drift mutation was too weak (OFF stayed absolute) and re-done as truly cumulative → caught; the "plain command cancels" test was too weak (the natural end-OFF looked identical to the cancel-OFF) → test now asserts the *time* of the OFF (t=1, not t=4) → caught.
 - Design note: a plain `ON`/`OFF` still goes through the bridge's normal queue (30 s hold, K2 only for plain commands); the "no late execution" guarantee applies to sequences, which use the direct path. Plain-command late execution remains (candidate follow-up).
-- **Not yet done (needs deploy to the S103 after the planned reboot)**: LED hardware test with timing from evok echo timestamps; stop-service-mid-duration → LED off; `kill -9` mid-duration → LED off within 15 s of restart; 24 h soak.
+
+## Hardware results (S103, after the planned reboot, `v2.2.0-rc3` → `rc5`, front-panel LED `led/1_01`)
+Reboot first: the box booted cleanly on the updated Raspberry Pi firmware, all services active, no stale libraries, no errors.
+- **Config used** (live `config.json`, backup `~/backups/config.json.before-T12-hwtest`): `circuits."led/1_01"` = `{failsafe_off: true, max_on_s: 15, max_count: 6, presets: {blink3: 3 pulses}}`. Left in place for the soak; remove afterwards if undesired.
+- **Rejections (5/5)**: count 7 / on_ms 5 / duration 99 / unknown preset / unknown key → each rejected with a precise `last_error` on the attributes topic; LED never switched.
+- **Preset `blink3`**: attribute timeline `remaining 3 → 2 → 1 → done` at 350 ms spacing = exactly the 100+250 ms plan; command → first write ≈ 40 ms (MQTT + bridge).
+- **Plain OFF during a timed run, timed ON, watchdog (plain ON forced OFF after `max_on_s`)**: behaved correctly end to end; only coarse timing is possible (see K16).
+- **Graceful `systemctl stop` mid timed run → LED ended OFF** (shutdown fail-safe; without it the output would stay ON forever because the sequence's timer dies with the process).
+- **`kill -9` mid timed run**: rc4: OFF 18.3 s after the kill (10 s systemd `RestartSec` + ~8 s stabilisation/discovery before the fail-safe). Fix in rc5 (fail-safe the moment the WebSocket connects, retried after discovery): **13.5 s**, of which the bridge itself needs 0.09 s after start. Remaining exposure is systemd's `RestartSec=10`; see K18.
+- **Bugs found only on hardware**: (1) watchdog was blind for outputs evok does not push over WebSocket (rc4 fix: it now follows the sequencer's own writes and plain-command acks; a ring train cannot trip it); (2) 8 s of avoidable fail-safe delay after a crash (rc5 fix).
+- **Limit of what could be measured**: evok neither pushes `led` changes over its WebSocket nor refreshes the REST value in under ~2–5 s, so the *physical* ring timing of this LED cannot be observed from software. Bridge-side timing is exact (above); the physical edge timing needs a relay/`do` with a scope, or a visual check of the LED. **Open for Matthijs.**
+- Soak: started 16:16 UTC with rc5; 24 h. Not a final release yet (`v2.2.0` after T13–T18 as planned).
 
 # Open questions
