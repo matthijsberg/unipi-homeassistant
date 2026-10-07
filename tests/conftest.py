@@ -17,10 +17,13 @@ import queue
 from pathlib import Path
 from types import SimpleNamespace
 
+import sys
+
 import pytest
 
 REAL_SLEEP = asyncio.sleep
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))  # lets hass-unipi.py import unipi_core, as when run from its directory
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
 

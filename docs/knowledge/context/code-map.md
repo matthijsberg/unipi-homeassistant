@@ -55,6 +55,13 @@ at tag `v2.0.0`. **Goldfish: re-grep the symbol, never trust a line number blind
 `settle()`, `drain()`, `fx()`. Every new task adds tests here; a change to a pinned behaviour
 must update the test deliberately and say so in the commit.
 
+# unipi_core (T10)
+
+`events.py` EventBus (`INPUT_CHANGED`, `OUTPUT_CHANGED`, `AVAILABILITY`; `bridge.events`),
+`commands.py` CommandService (`send_ws`, `set_digital`, `transition`; `bridge.commands`). All
+output commands go through `CommandService.send_ws`; all acks pass `mqtt_ack(..., origin=)`.
+Subscribe with `bridge.events.subscribe(kind, callback)`; callbacks take keyword args.
+
 # Tooling (T03)
 
 `tools/{backup.sh,deploy.sh,rollback.sh,healthcheck.py}` — see `tools/README.md`. Deploy = preflight → backup →

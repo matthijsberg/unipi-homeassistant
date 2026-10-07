@@ -32,6 +32,9 @@ from websockets.protocol import State
 import aiohttp
 from aiohttp import web
 
+from unipi_core.commands import CommandService
+from unipi_core.events import AVAILABILITY, INPUT_CHANGED, OUTPUT_CHANGED, EventBus
+
 # --- Check Required Libraries ---
 REQUIRED_LIBRARIES = {
     "paho.mqtt": "paho-mqtt",
@@ -75,7 +78,7 @@ else:
     print("Required libraries check passed.")
 
 # --- Script Version ---
-SCRIPT_VERSION = "2026092501"
+SCRIPT_VERSION = "2.2.0-rc1"
 
 # --- Constants ---
 # Last discovered device name, so the MQTT last-will can use the device's own
@@ -576,6 +579,10 @@ class UnipiBridge:
         asyncio.set_event_loop(self.loop)
         self.initial_websocket_ready = asyncio.Event()
         self.initial_discovery_complete = asyncio.Event()
+
+        # Internal API: observe state changes (events) / drive outputs (commands)
+        self.events = EventBus(self.loop, self.logger)
+        self.commands = CommandService(self)
 
         # MQTT Client
         api_version = getattr(mqtt, "CallbackAPIVersion", None)
@@ -2515,6 +2522,16 @@ class UnipiBridge:
                         pass
 
                 self.device_states[sensor_device_key] = sensor_value
+                self.events.emit(
+                    INPUT_CHANGED,
+                    dev=dev,
+                    circuit=circuit,
+                    value=sensor_value,
+                    raw=sensor_value,
+                    ts=time.time(),
+                    source="republish" if force else "ws",
+                    subkey=sensor_key,
+                )
 
                 topic = self.generate_mqtt_topic_update(dev, circuit, sensor_key)
                 # The discovery config expects {"value": ...}
@@ -2582,6 +2599,16 @@ class UnipiBridge:
 
                 # Update State
                 self.device_states[device_key] = raw_value
+                self.events.emit(
+                    INPUT_CHANGED,
+                    dev=dev,
+                    circuit=circuit,
+                    value=raw_value,
+                    raw=raw_value,
+                    ts=time.time(),
+                    source="republish" if force else "ws",
+                    subkey=None,
+                )
 
                 # --- Local Logic Engine ---
                 # Not on republish: nothing changed, so rules must not fire.
@@ -2745,9 +2772,8 @@ class UnipiBridge:
         }
 
         try:
-            ws_msg_json = json.dumps(ws_msg_dict)
-            # Correcting queue name: mqtt_to_websocket_queue (MQTT -> WS)
-            self.mqtt_to_websocket_queue.put_nowait(ws_msg_json)
+            if self.commands.send_ws(parts.dev, parts.circuit, ws_state_value) is None:
+                return  # queue full; send_ws already logged the dropped command
 
             # Verification with Retry
             verified = False
@@ -2858,18 +2884,18 @@ class UnipiBridge:
         )
         if not current_value_dict or "value" not in current_value_dict:
             self.logger.warning("Could not read current value. Optimistic ACK.")
-            self.mqtt_ack(str(desired_value), dev, circuit)
+            self.mqtt_ack(str(desired_value), dev, circuit, origin="fade")
             return
 
         try:
             current_value = int(float(current_value_dict["value"]) * 100)
         except Exception:
-            self.mqtt_ack(str(desired_value), dev, circuit)
+            self.mqtt_ack(str(desired_value), dev, circuit, origin="fade")
             return
 
         if desired_value == current_value:
             self.logger.info("Already at target value.")
-            self.mqtt_ack(str(desired_value), dev, circuit)
+            self.mqtt_ack(str(desired_value), dev, circuit, origin="fade")
             return
 
         # Start Async Task
@@ -2920,7 +2946,6 @@ class UnipiBridge:
                 steps = max(1, int(round(transition_time / step_time)))
 
             step_size = value_diff / steps if steps > 0 else 0
-            ws_msg_dict = {"cmd": "set", "dev": dev, "circuit": circuit, "value": None}
             current_step_value = float(current_value)
             start_time = time.monotonic()
 
@@ -2943,8 +2968,7 @@ class UnipiBridge:
                     final_step_value = max(final_step_value, desired_value)
 
                 ws_value = round(final_step_value / 100, 3)
-                ws_msg_dict["value"] = ws_value
-                self.mqtt_to_websocket_queue.put(json.dumps(ws_msg_dict))
+                self.commands.send_ws(dev, circuit, ws_value, block=True)
 
                 loop_elapsed_time = time.monotonic() - loop_start_time
                 total_elapsed_time = time.monotonic() - start_time
@@ -2956,7 +2980,7 @@ class UnipiBridge:
             else:
                 self.logger.info(f"AO Task ({circuit_key}): Loop completed.")
 
-            self.mqtt_ack(str(desired_value), dev, circuit)
+            self.mqtt_ack(str(desired_value), dev, circuit, origin="fade")
 
         except Exception as e:
             self.logger.exception(f"Error in AO transition task: {e}")
@@ -2969,7 +2993,7 @@ class UnipiBridge:
 
     @log_function
     def mqtt_ack(
-        self, final_value_payload: str, dev: str, circuit: str
+        self, final_value_payload: str, dev: str, circuit: str, origin: str = "mqtt"
     ) -> list[tuple[str, str]]:
         """
         Sends an MQTT acknowledgement (state update) for a command.
@@ -2983,6 +3007,7 @@ class UnipiBridge:
             list[tuple[str, str]]: The generated MQTT messages.
         """
         generated_messages = []
+        ack_value: Any = None
         state_topic = self.generate_mqtt_topic_update(dev, circuit, "state")
 
         try:
@@ -3013,6 +3038,7 @@ class UnipiBridge:
                             (state_topic, state_payload)
                         )
                         generated_messages.append((state_topic, state_payload))
+                        ack_value = brightness_value
                     except ValueError:
                         self.logger.error(
                             f"MQTT_ack (AO): Invalid value '{final_value_payload}'"
@@ -3036,6 +3062,7 @@ class UnipiBridge:
                         )
                         self.websocket_to_mqtt_queue.put_nowait((state_topic, state_value))
                         generated_messages.append((state_topic, state_value))
+                        ack_value = 1 if state_value == "ON" else 0
                     except ValueError:
                         self.logger.error(
                             f"MQTT_ack ({dev}): Invalid value '{final_value_payload}'"
@@ -3049,6 +3076,17 @@ class UnipiBridge:
                         (state_topic, str(final_value_payload))
                     )
                     generated_messages.append((state_topic, str(final_value_payload)))
+                    ack_value = final_value_payload
+
+            if ack_value is not None:
+                self.events.emit(
+                    OUTPUT_CHANGED,
+                    dev=dev,
+                    circuit=circuit,
+                    value=ack_value,
+                    ts=time.time(),
+                    origin=origin,
+                )
 
         except queue.Full:
             self.logger.error(f"MQTT_ack Queue Full! Dropping ACK for {dev}/{circuit}")
@@ -3385,7 +3423,7 @@ class UnipiBridge:
                     }
 
                     # Send MQTT ACK (Optimistic)
-                    self.mqtt_ack(str(cmd_value), dev, circuit)
+                    self.mqtt_ack(str(cmd_value), dev, circuit, origin="rule")
 
                 case "analogoutput" | "ao":
                     # Handle AO
@@ -3401,7 +3439,7 @@ class UnipiBridge:
                         # Send MQTT ACK (Optimistic)
                         # Assume 0-10V -> 0-1000 brightness scale
                         ack_value = int(target_value * 100)
-                        self.mqtt_ack(str(ack_value), dev, circuit)
+                        self.mqtt_ack(str(ack_value), dev, circuit, origin="rule")
 
                         # Handle Transition if present
                         if transition is not None and float(transition) > 0:
@@ -3438,8 +3476,7 @@ class UnipiBridge:
                         return
 
             if cmd_data:
-                payload = json.dumps(cmd_data)
-                self.mqtt_to_websocket_queue.put_nowait(payload)
+                self.commands.send_ws(cmd_data["dev"], cmd_data["circuit"], cmd_data["value"])
 
         except Exception as e:
             self.logger.error(f"Error executing local action: {e}")
@@ -3514,14 +3551,8 @@ class UnipiBridge:
                     if target_val <= 0.0:
                         target_val = 10.0
 
-                cmd_data = {
-                    "cmd": "set",
-                    "dev": dev,
-                    "circuit": circuit,
-                    "value": target_val,
-                }
-                self.mqtt_to_websocket_queue.put_nowait(json.dumps(cmd_data))
-                self.mqtt_ack(str(int(target_val * 100)), dev, circuit)
+                self.commands.send_ws(dev, circuit, target_val)
+                self.mqtt_ack(str(int(target_val * 100)), dev, circuit, origin="rule")
 
     async def _dimmer_hold_task(self, rule_id: str, dev: str, circuit: str) -> None:
         """Async task that handles the dimming loop while button is held."""
@@ -3551,14 +3582,8 @@ class UnipiBridge:
                 new_val = max(0.0, min(10.0, new_val))
                 
                 if new_val != current_val:
-                    cmd_data = {
-                        "cmd": "set",
-                        "dev": dev,
-                        "circuit": circuit,
-                        "value": round(new_val, 2),
-                    }
-                    self.mqtt_to_websocket_queue.put_nowait(json.dumps(cmd_data))
-                    self.mqtt_ack(str(int(new_val * 100)), dev, circuit)
+                    self.commands.send_ws(dev, circuit, round(new_val, 2))
+                    self.mqtt_ack(str(int(new_val * 100)), dev, circuit, origin="rule")
                     # Optimistically update local state
                     self.device_states[f"{dev}_{circuit}"] = new_val
                 
@@ -3588,6 +3613,7 @@ class UnipiBridge:
             self.logger.error(
                 f"Error publishing availability status: {e}", exc_info=True
             )
+        self.events.emit(AVAILABILITY, online=(status == "online"), ts=time.time())
 
     def publish_error(self, is_error: bool, details: str = "") -> None:
         """
