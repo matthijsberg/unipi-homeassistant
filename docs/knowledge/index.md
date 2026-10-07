@@ -30,6 +30,7 @@ description: "The project's long-term memory (the \"Elephant\"): context, contra
 * [ADR-003 Pulse/duration sequencer](decisions/ADR-003-pulse-sequence-command.md) - doorbell in one MQTT message, with safety
 * [ADR-004 Versioning and backups](decisions/ADR-004-versioning-and-backups.md) - GitHub, semver tags, backups
 * [ADR-005 Core vs Home Assistant](decisions/ADR-005-core-vs-home-assistant.md) - where logic lives
+* [ADR-006 BaseOS deployment](decisions/ADR-006-baseos-deployment.md) - bootstrap script, release folders, site bundle
 
 # Runbooks
 

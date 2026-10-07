@@ -8,6 +8,8 @@ generated: { by: claude-code/claude-opus-5-5, at: 2026-10-07T09:30:00Z }
 ---
 
 # Decision
+> **Amended 2026-10-07 by Matthijs:** on-device backups (`tools/backup.sh`) plus Git/GitHub versioning of everything we build are sufficient; automated off-box backup is not required. Config survives an SD loss via the private site bundle ([ADR-006](/decisions/ADR-006-baseos-deployment.md)).
+
 - **Repo:** `github.com/matthijsberg/unipi-homeassistant` (public, chosen 2026-10-07).
   Working clone on each box: `~/src/unipi-homeassistant`. Runtime dir
   `/home/unipi/unipi-homeassistant/scripts` becomes a *deploy target only* (no editing there).
