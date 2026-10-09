@@ -62,7 +62,7 @@ function fetch(url, opts) {
 // ---------------- fake Blockly ----------------
 class FField { constructor(kind, value) { this.kind = kind; this.value = value; } }
 var Blockly = {
-  Events: { BLOCK_CHANGE: 'change', BLOCK_CREATE: 'create' },
+  Events: { BLOCK_CHANGE: 'change', BLOCK_CREATE: 'create', SELECTED: 'selected', CLICK: 'click' },
   Blocks: {},
   FieldTextInput: class extends FField { constructor(v) { super('text', String(v == null ? '' : v)); } set(v) { this.value = String(v); } },
   FieldNumber: class extends FField { constructor(v, min, max) { super('number', Number(v)); this.min = min; this.max = max; } set(v) { let n = Number(v); if (isNaN(n)) return; if (this.min != null && n < this.min) n = this.min; if (this.max != null && n > this.max) n = this.max; this.value = n; } },
@@ -70,8 +70,8 @@ var Blockly = {
   FieldDropdown: class extends FField { constructor(options) { super('dropdown', options[0][1]); this.options = options; } set(v) { if (this.options.some(o => o[1] === String(v))) this.value = String(v); /* real Blockly ignores unknown options */ } },
   lastOptions: null,
   svgResize() {},
-  selected: null,
-  getSelected() { return Blockly.selected; },
+  getSelected() { return null; },   // real Blockly 13: the FOCUSED block - null as soon as a toolbar button is clicked
+  common: { getSelected() { return null; } },
   inject(id, opts) { Blockly.lastOptions = opts; Blockly.ws = new FakeWorkspace(); return Blockly.ws; },
 };
 class FakeBlock {

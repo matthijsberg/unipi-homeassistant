@@ -274,9 +274,11 @@ def test_a_rule_without_trigger_or_action_is_not_saved_half_finished():
 
 # ---- Test button: run the action of the selected, saved rule --------------------------------------------------------------------
 def select(ed, index=0, child=None):
+    """What a click on the canvas does in Blockly 13: a 'selected' event. Pressing the Test button afterwards
+    moves the focus away, so Blockly's own getSelected() is then null (the fake mimics that)."""
     rule = "workspace.getTopBlocks(true).filter(b=>b.type==='unipi_rule')[%d]" % index
     target = rule if child is None else "%s.getInputTargetBlock('%s')" % (rule, child)
-    ed.run("Blockly.selected = %s" % target)
+    ed.run("workspace.fire({type: Blockly.Events.SELECTED, oldElementId: null, newElementId: (%s).id})" % target)
 
 
 def posted(ed):
@@ -323,7 +325,6 @@ def test_declining_the_confirmation_runs_nothing():
 
 def test_nothing_selected_asks_to_select_a_rule_and_calls_nothing():
     ed = Editor(RULES)
-    ed.run("Blockly.selected = null")
     press_test(ed)
     assert posted(ed) == [] and ed.js("__confirms") == []
     msg, color = status(ed)
@@ -332,7 +333,7 @@ def test_nothing_selected_asks_to_select_a_rule_and_calls_nothing():
 
 def test_a_new_unsaved_rule_cannot_be_tested():
     ed = Editor(RULES)
-    ed.run("var nb = workspace.newBlock('unipi_rule'); Blockly.selected = nb")
+    ed.run("var nb = workspace.newBlock('unipi_rule'); workspace.fire({type: Blockly.Events.SELECTED, newElementId: nb.id})")
     press_test(ed)
     assert posted(ed) == [] and "not saved yet" in status(ed)[0]
 
@@ -369,3 +370,22 @@ def test_server_refusal_and_success_are_shown():
 
 def test_the_test_buttons_exist_in_the_page():
     assert "testRule('tap')" in HTML and "testRule('hold')" in HTML
+
+
+def test_the_target_survives_blockly_losing_its_selection_and_is_shown():
+    ed = Editor(RULES)
+    select(ed, 2, child="ACTION")
+    assert ed.js("document.getElementById('testTarget').textContent") == "Test target: Doorbell"
+    ed.run("workspace.fire({type: Blockly.Events.SELECTED, oldElementId: 'x', newElementId: null})")    # focus moved to the button
+    press_test(ed)
+    assert [c["url"] for c in posted(ed)] == ["/api/rules/c/test"]
+
+
+def test_a_click_event_also_selects_and_a_deleted_block_does_not():
+    ed = Editor(RULES)
+    ed.run("workspace.fire({type: Blockly.Events.CLICK, blockId: workspace.getTopBlocks(true).filter(b=>b.type==='unipi_rule')[1].id})")
+    press_test(ed)
+    assert [c["url"] for c in posted(ed)] == ["/api/rules/b/test"]
+    ed.run("__calls.length = 0; workspace.fire({type: Blockly.Events.SELECTED, newElementId: 'blk_does_not_exist'})")
+    press_test(ed)                                                    # unknown id: the previous target stays
+    assert [c["url"] for c in posted(ed)] == ["/api/rules/b/test"]
