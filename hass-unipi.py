@@ -86,7 +86,7 @@ else:
     print("Required libraries check passed.")
 
 # --- Script Version ---
-SCRIPT_VERSION = "2.2.0-rc9"
+SCRIPT_VERSION = "2.2.0-rc10"
 
 # --- Constants ---
 # Last discovered device name, so the MQTT last-will can use the device's own
@@ -402,19 +402,36 @@ class LocalLogicEngine:
         self.trace: deque = deque(maxlen=300)
         self._seq = 0
         self._last_nonmatch: dict[str, float] = {}
+        self.on_executed = None        # callback(entry): a rule action really ran (-> Home Assistant logbook event)
+        self.on_rules_changed = None   # callback(): the rule set changed (-> refresh the declared event types)
         self.rules: list[LocalLogicRule] = []
         self.load_rules()
 
-    def record(self, rule_id: str | None, rule_name: str | None, step: str, ok: bool, detail: str) -> None:
+    def record(self, rule_id: str | None, rule_name: str | None, step: str, ok: bool, detail: str,
+               extra: dict[str, Any] | None = None) -> None:
         self._seq += 1
-        self.trace.append({"seq": self._seq, "ts": time.time(), "rule_id": rule_id, "rule": rule_name,
-                           "step": step, "ok": ok, "detail": detail})
+        entry = {"seq": self._seq, "ts": time.time(), "rule_id": rule_id, "rule": rule_name,
+                 "step": step, "ok": ok, "detail": detail, "extra": extra or {}}
+        self.trace.append(entry)
+        if step == "executed" and ok and self.on_executed:
+            try:
+                self.on_executed(entry)
+            except Exception as e:
+                self.logger.error(f"Rule event callback failed: {e}")
 
     def trace_since(self, since: int = 0) -> dict[str, Any]:
         return {"last": self._seq, "events": [e for e in self.trace if e["seq"] > since]}
 
     def revalidate(self) -> None:
         """Disable (not delete) rules that are invalid for the current circuit configuration."""
+        self._revalidate()
+        if self.on_rules_changed:
+            try:
+                self.on_rules_changed()
+            except Exception as e:
+                self.logger.error(f"Rules-changed callback failed: {e}")
+
+    def _revalidate(self) -> None:
         self.disabled = {}
         if not self.validator:
             return
@@ -634,6 +651,9 @@ class UnipiBridge:
         self._dim_sleep = asyncio.sleep   # replaced in tests so dimming can run on a fake clock
         self.dimmer_persist: dict[str, dict[str, Any]] = self._load_dimmer_state()
         self.local_logic = LocalLogicEngine(rules_path, self.logger, validator=self.validate_rule)
+        self._rule_event_types: set[str] = set()
+        self.local_logic.on_executed = self._publish_rule_event
+        self.local_logic.on_rules_changed = self._publish_rule_event_discovery
 
         # State
         self.shadow: bool = self.config.mode == "shadow"
@@ -1829,6 +1849,8 @@ class UnipiBridge:
             )
             return None
 
+        self._publish_rule_event_discovery()
+
         # Subscribe
         self.logger.info(
             f"Subscribing to {len(self.mqtt_subscribe_topics)} collected MQTT command topics..."
@@ -2001,6 +2023,7 @@ class UnipiBridge:
                     self.publish_discovery_config(item, self.device_info)
                     if item.get("dev") == "modbus_slave" and item.get("circuit"):
                         self.publish_extension_discovery(item["circuit"])
+            self._publish_rule_event_discovery()
             # publish_discovery_config() appends the command topics again
             self.mqtt_subscribe_topics = list(dict.fromkeys(self.mqtt_subscribe_topics))
             self.publish_bridge_discovery()
@@ -3690,7 +3713,58 @@ class UnipiBridge:
 
     # ---- T17 helpers -----------------------------------------------------------------------------
     def _rec(self, action: dict[str, Any], step: str, ok: bool, detail: str) -> None:
-        self.local_logic.record(action.get("rule_id"), action.get("rule_name"), step, ok, detail)
+        self.local_logic.record(
+            action.get("rule_id"), action.get("rule_name"), step, ok, detail,
+            extra={"target": f"{action.get('dev')}/{action.get('circuit')}", "action": action.get("type", "set")},
+        )
+
+    def _rule_event_topic(self) -> str:
+        return f"{self.config.mqtt.topic}/{self.device_name}/rules/activity"
+
+    def _publish_rule_event_discovery(self) -> None:
+        """One HA `event` entity; its event types are the rule names, so the Logbook says WHICH rule fired."""
+        if not self.device_name or not self.device_info:
+            return
+        names = sorted({(r.name or "rule") for r in self.local_logic.rules})
+        types = names + ["other"]
+        self._rule_event_types = set(types)
+        d = self.device_info
+        dev_info = {
+            "identifiers": [self.device_name],
+            "name": f"Unipi {d.get('family', 'unknown')} {d.get('model', 'unknown')} ({d.get('sn', 'unknown')}){self._shadow_tag()}",
+            "manufacturer": "Unipi Technology s.r.o.",
+            "model": f"{d.get('family', 'unknown')} {d.get('model', 'unknown')}",
+            "sn": d.get("sn", "unknown"),
+        }
+        url = self._build_configuration_url()
+        if url:
+            dev_info["configuration_url"] = url
+        cfg = {
+            "name": "Rule activity" + self._shadow_tag(),
+            "unique_id": f"{self.device_name}_rule_activity",
+            "dev": dev_info,
+            "origin": {"name": "Unipi - HomeAssistant", "sw": SCRIPT_VERSION,
+                       "url": "https://github.com/matthijsberg/unipi-homeassistant"},
+            "state_topic": self._rule_event_topic(),
+            "event_types": types,
+            "icon": "mdi:script-text-play",
+            "availability_topic": f"{self.config.mqtt.topic}/{self.device_name}/status",
+            "payload_available": "online",
+            "payload_not_available": "offline",
+        }
+        self._enqueue_ws_to_mqtt((
+            f"{self.config.mqtt.discovery_prefix}/event/{self.device_name}/rule_activity/config",
+            json.dumps(cfg),
+        ))
+
+    def _publish_rule_event(self, entry: dict[str, Any]) -> None:
+        """A rule action really ran: tell Home Assistant (shows up in its Logbook). Never retained."""
+        if not self.device_name:
+            return
+        name = entry.get("rule") or "rule"
+        payload = {"event_type": name if name in self._rule_event_types else "other", "rule": name,
+                   "detail": entry.get("detail"), **(entry.get("extra") or {})}
+        self._enqueue_ws_to_mqtt((self._rule_event_topic(), json.dumps(payload)))
 
     def _ha_reachable(self) -> bool:
         return self.ha_online is True and self.mqtt_client.is_connected()

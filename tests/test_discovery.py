@@ -21,7 +21,7 @@ def test_entity_counts_per_component(discovered):
         parts = topic.split("/")
         if parts[0] == PFX and parts[2] == DN and parts[-1] == "config":
             own[parts[1]] += 1
-    assert own == {"binary_sensor": 8, "switch": 9, "light": 12, "sensor": 15}
+    assert own == {"binary_sensor": 8, "switch": 9, "light": 12, "sensor": 15, "event": 1}   # event = "Rule activity" (T17d)
 
 
 def test_extension_monitor_entities(discovered):

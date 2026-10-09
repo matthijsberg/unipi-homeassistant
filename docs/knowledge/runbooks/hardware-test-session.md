@@ -23,6 +23,11 @@ Open `http://<S103_IP>:8088`, log in. Pass when:
 3. Reload the page: every rule, field and the "Runs" setting is back; saving again changes nothing.
 4. Delete the test rules and save (leave the file as `[]`).
 
+# 1a. "Who switched it?" in Home Assistant (T17d, rc10) — no hardware effect
+After a rule has fired: in HA open **Settings → Devices → the Unipi device** → entity **"Rule activity"** (last event = the rule name; attributes: what was
+sent and the target), and the **Logbook** shows "Rule activity detected <rule name>" right beside the lamp's state change. If the logbook only says
+"detected an event", open the entity's attributes. The device page's "Visit" link opens the Unipi editor/activity panel.
+
 # 1b. Push-to-dim (T17, rc9) — house impact: the lamp on the chosen analog output
 Block "Push-to-dim light" (circuit = the analog output of your lamp, switch-on level e.g. 8 V, hold time 800 ms). Pass: a tap switches the lamp on/off;
 holding longer than 0.8 s dims it up (lamp on) and keeps going until you let go; the next hold goes the other way; dimming down never switches
