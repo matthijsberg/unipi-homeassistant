@@ -97,4 +97,8 @@ Matthijs wanted to stop searching HA for who switches a lamp and chose **the Log
 - Trace entries now carry `target`/`action` too (visible via `/api/rule_trace`).
 - Tests: 303 (+10); 9 mutation checks, 8 caught at once, 1 real test gap (callback failure was silently swallowed elsewhere) → test strengthened → caught.
 
+# Follow-up 2026-10-09 (4): fade when tapped (`rc11`)
+Matthijs (push-to-dim works great): the tap that switches a lamp on/off lost the fade time the old "Set Device" block had. Added `dimmer_fade_on_ms` / `dimmer_fade_off_ms` (0 = instant, default; 0–60000), separate for switching ON and OFF, in the editor block ("Fade on / off when tapped (ms)"). HA shows the wanted end state immediately; the lamp follows via the existing AO fade engine. A second tap during a fade reverses it from where it is; an instant tap or a hold cancels a running fade. The activity log says "fading over N ms".
+Tests 317; 7 mutation checks: 4 caught, **3 survivors were all weak tests of mine** (checked after the fade had finished; the hold test measured the fade's legitimate steps before the hold time had passed) → strengthened (shared fake clock, immediate assertions) → all caught.
+
 # Open questions

@@ -27,12 +27,12 @@ def test_save_keeps_unknown_fields_and_the_rule_id():
     assert "JSON.parse(block.data)" in SCRIPT and "Object.assign({}, base" in SCRIPT   # save starts from it
 
 
-@pytest.mark.parametrize("field", ["LEVEL", "HOLD", "HOLD_MS", "SPEED", "MINV", "PRESET", "COUNT", "ON_MS", "OFF_MS"])
+@pytest.mark.parametrize("field", ["LEVEL", "HOLD", "HOLD_MS", "SPEED", "MINV", "FADE_ON", "FADE_OFF", "PRESET", "COUNT", "ON_MS", "OFF_MS"])
 def test_new_fields_are_used_for_both_saving_and_loading(field):
     assert len(re.findall(rf"['\"]{field}['\"]", SCRIPT)) >= 3          # defined once, read on save, set on load
 
 
-@pytest.mark.parametrize("key", ["action_pulse", "action_preset", "dimmer_hold", "dimmer_hold_ms", "dimmer_speed", "dimmer_min"])
+@pytest.mark.parametrize("key", ["action_pulse", "action_preset", "dimmer_hold", "dimmer_hold_ms", "dimmer_speed", "dimmer_min", "dimmer_fade_on_ms", "dimmer_fade_off_ms"])
 def test_saved_rule_contains_the_new_keys(key):
     assert key in SCRIPT
 
