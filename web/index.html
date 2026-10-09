@@ -425,6 +425,7 @@
             <div id="groupTabs"></div>
             <input id="ruleSearch" type="search" placeholder="Search rule / circuit..." oninput="applyView()">
             <span style="flex: 1;"></span>
+            <span id="testTarget" style="font-size: 0.85rem; color: #2c3e50;"></span>
             <span class="tools">
                 <button onclick="testRule('tap')" title="Select a saved rule (click its name), then run its ACTION once on the real Unipi. Trigger and conditions are skipped.">&#9654; Test</button>
                 <button onclick="testRule('hold')" title="For push-to-dim rules: press and hold for a few seconds, then let go">&#9654; Test hold</button>
@@ -694,6 +695,7 @@
 
             // View state. Declared up here on purpose: loadRules() runs early and reads these before the
             // view code further down is reached (a `let` below would still be uninitialised: empty editor).
+            let lastClickedId = null;   // the block the user clicked last (see selectedRule)
             let savedSig = null;     // the rules as last loaded/saved, to see unsaved changes before a test
             const NO_GROUP = '\u0000none';
             let activeGroup = '*';
@@ -1257,16 +1259,22 @@
                 try { savedSig = JSON.stringify(buildRules()); } catch (e) { savedSig = null; }
             }
 
+            // Blockly's own getSelected() is the block that has keyboard focus, which is gone the moment the
+            // Test button is clicked. So remember the last block the user clicked (rule or any part of it).
             function selectedRule() {
-                let b = null;
-                try { b = (Blockly.getSelected || Blockly.common.getSelected)(); } catch (e) { b = null; }
+                let b = lastClickedId ? workspace.getBlockById(lastClickedId) : null;
                 while (b && b.type !== 'unipi_rule') b = b.getParent ? b.getParent() : null;
                 return b;
             }
 
+            function showTestTarget() {
+                const b = selectedRule();
+                document.getElementById('testTarget').textContent = b ? ('Test target: ' + (b.getFieldValue('NAME') || 'rule')) : '';
+            }
+
             async function testRule(mode) {
                 const block = selectedRule();
-                if (!block) { showStatus('Click a rule first (on its name), then press Test.', true); return; }
+                if (!block) { showStatus('Click a rule or its action block first, then press Test.', true); return; }
                 let id = null;
                 try { id = JSON.parse(block.data || '{}').id || null; } catch (e) { id = null; }
                 if (!id) { showStatus('This rule is not saved yet - press Save first.', true); return; }
@@ -1307,6 +1315,9 @@
             // A new rule created while a group tab is open joins that group; renaming a group updates the tabs.
             workspace.addChangeListener(ev => {
                 try {
+                    const clicked = ev.type === Blockly.Events.SELECTED ? ev.newElementId
+                                  : ev.type === Blockly.Events.CLICK ? ev.blockId : null;
+                    if (clicked && workspace.getBlockById(clicked)) { lastClickedId = clicked; showTestTarget(); }
                     if (ev.type === Blockly.Events.BLOCK_CHANGE && ev.element === 'field' && ev.name === 'GROUP') {
                         rebuildTabs(); applyView();
                     } else if (ev.type === Blockly.Events.BLOCK_CREATE && ev.ids) {

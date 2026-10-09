@@ -120,4 +120,7 @@ Matthijs asked for a way to run the actions of an automation without waiting for
 - Tests 370 (+22: 11 backend, 11 executed-editor); 15 mutation checks, 14 caught at once, 1 survivor (the `when` gate was never really closed in my test: HA counted as unreachable because the fake MQTT link was down) → test strengthened → caught.
 - Not verified in a real browser (see follow-up 5).
 
+# Follow-up 2026-10-09 (7): Test button found no rule → `rc14`
+Matthijs: "Click a rule first..." whatever he clicked. Cause (found by reading the vendored Blockly 13 source): `Blockly.common.getSelected()` returns the block that has **keyboard focus**, and clicking an HTML button moves the focus away, so the selection was always empty at the moment of the test. My rc13 tests used a fake that kept the selection, so they could not see it. Fix: the editor remembers the last block clicked (Blockly `SELECTED` / `CLICK` events), any part of a rule (action block included) selects that rule, and the bar shows "Test target: <rule name>". The fake Blockly now mimics the real behaviour (`getSelected()` is always null), so the old approach fails the tests. Lesson: a fake must reproduce the real API's *failure modes*, not just its happy path.
+
 # Open questions

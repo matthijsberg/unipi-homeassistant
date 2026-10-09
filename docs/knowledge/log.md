@@ -27,4 +27,5 @@
 * **2026-10-09 dimmer fade → `rc11`**: separate fade-on / fade-off time for the tap of a push-to-dim light (the old Transition (ms)). 317 tests.
 * **2026-10-09 editor zoom + group tabs → `rc12`**: zoom, per-group tabs, search, arrange/fit/collapse in the rule editor; Blockly vendored (13.3.0). Editor script now executed in tests (QuickJS + fake Blockly), which caught an empty-editor bug before release. Real-browser check pending (Matthijs). 348 tests.
 * **2026-10-09 rule Test button → `rc13`**: `POST /api/rules/<id>/test` + ▶ Test / ▶ Test hold in the editor; runs a saved rule's action on demand (trigger/conditions skipped), labelled TEST in trace and Logbook. 370 tests.
+* **2026-10-09 Test button fix → `rc14`**: the Test button could not find the clicked rule (Blockly's selection = keyboard focus, lost on button click). Editor now tracks the last clicked block and shows the test target. 372 tests.
 * **Next**: milestone v2.1.0 (T03+T04, no runtime code change); then Phase 1 starting with T10. T20 (capture legacy contract) can run in parallel; configure an off-box backup target when one exists.

@@ -34,6 +34,7 @@ If anything is off, note which step and what you saw (screenshot helps); rollbac
 
 # 1c. Test button: run a rule's action on demand (T17g, rc13) — 3 min, switches the real output
 Use this to try the bell/lamp rules without pressing the physical button. Click a **saved** rule, press **▶ Test** and confirm. Pass when:
+0. After clicking a rule or its action block the bar shows "Test target: <name>".
 1. The output does what the rule's action says (lamp on/off or fade, bell rings N times with the right timing, push-to-dim toggles).
 2. For a push-to-dim rule **▶ Test hold** dims for a few seconds and then stops by itself.
 3. The Rule activity panel shows `TEST ...` lines; HA Logbook shows the event with "TEST:" in its detail.
