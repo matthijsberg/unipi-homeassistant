@@ -1,7 +1,10 @@
 // A small fake browser + fake Blockly, just enough to EXECUTE the real inline script of web/index.html in tests.
 // Where it matters it is as strict as the real thing: setFieldValue on an unknown field throws, a dropdown ignores
 // values that are not one of its options, getFieldValue of an unknown field returns null.
-var __errors = [], __timers = [], __timeouts = [], __calls = [], __state = { rules: [], trace: [], putStatus: 200, putBody: null, nextId: 1 };
+var __errors = [], __timers = [], __timeouts = [], __calls = [], __state = { rules: [], trace: [], putStatus: 200, putBody: null, nextId: 1,
+  confirmAnswer: true, testStatus: 200, testBody: { ok: true, events: [] } };
+var __confirms = [];
+function confirm(msg) { __confirms.push(String(msg)); return __state.confirmAnswer; }
 var console = { log() {}, warn() {}, info() {}, error() { __errors.push(Array.prototype.map.call(arguments, String).join(' ')); } };
 
 class ClassList {
@@ -48,6 +51,7 @@ function fetch(url, opts) {
     return __resp(200, { status: 'ok', count: __state.rules.length });
   }
   if (url.indexOf('/api/rule_trace') === 0) { const since = parseInt(url.split('since=')[1] || '0', 10); return __resp(200, { last: __state.trace.length ? __state.trace[__state.trace.length - 1].seq : since, events: __state.trace.filter(e => e.seq > since) }); }
+  if (/^\/api\/rules\/[^/]+\/test$/.test(url) && method === 'POST') return __resp(__state.testStatus, JSON.parse(JSON.stringify(__state.testBody)));
   if (url === '/api/auth_check') return __resp(200, { authenticated: true, username: 'tester' });
   if (url === '/api/info') return __resp(200, { name: 'Neuron_S103_2258', model: 'Neuron S103', sn: 2258, ip: '10.0.0.2' }); // pii-ok (fake test data)
   if (url === '/api/status') return __resp(200, {});
@@ -66,6 +70,8 @@ var Blockly = {
   FieldDropdown: class extends FField { constructor(options) { super('dropdown', options[0][1]); this.options = options; } set(v) { if (this.options.some(o => o[1] === String(v))) this.value = String(v); /* real Blockly ignores unknown options */ } },
   lastOptions: null,
   svgResize() {},
+  selected: null,
+  getSelected() { return Blockly.selected; },
   inject(id, opts) { Blockly.lastOptions = opts; Blockly.ws = new FakeWorkspace(); return Blockly.ws; },
 };
 class FakeBlock {
@@ -86,6 +92,7 @@ class FakeBlock {
   }
   appendDummyInput() { return this._input('dummy'); } appendValueInput(n) { return this._input('value', n); } appendStatementInput(n) { return this._input('statement', n); }
   setOutput() {} setColour() {} setHelpUrl() {} setTooltip(t) { this.tooltip = t; } setCommentText(t) { this.comment = t; } setWarningText(t) { this.warning = t; }
+  getParent() { return this.parent; }
   getInput(n) { return this.inputs[n]; } getInputTargetBlock(n) { const i = this.inputs[n]; return i ? i.target : null; } getNextBlock() { return this.nextBlock; }
   getFieldValue(n) { const f = this.fields[n]; return f ? f.value : null; }
   setFieldValue(v, n) { const f = this.fields[n]; if (!f) throw new Error('Field "' + n + '" not found.'); const old = f.value; f.set(v); if (f.value !== old) this.workspace.fire({ type: Blockly.Events.BLOCK_CHANGE, element: 'field', name: n, blockId: this.id }); }

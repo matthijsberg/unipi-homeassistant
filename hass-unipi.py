@@ -86,7 +86,7 @@ else:
     print("Required libraries check passed.")
 
 # --- Script Version ---
-SCRIPT_VERSION = "2.2.0-rc12"
+SCRIPT_VERSION = "2.2.0-rc13"
 
 # --- Constants ---
 # Last discovered device name, so the MQTT last-will can use the device's own
@@ -528,6 +528,35 @@ class LocalLogicEngine:
             val = device_states.get(f"1wdevice_{circuit}_{dev}")
         return val
 
+    def action_for(self, rule: "LocalLogicRule", trigger_value: Any) -> dict[str, Any]:
+        """The action dict the bridge executes for this rule (same for a real trigger and for an editor test)."""
+        action = {
+            "type": getattr(rule, "action_type", "set"),
+            "dev": normalize_dev(rule.action_dev),
+            "circuit": rule.action_circuit,
+            "value": rule.action_value,
+            "trigger_value": trigger_value,
+            "rule_id": rule.id,
+            "rule_name": rule.name,
+            "pulse": rule.action_pulse,
+            "preset": rule.action_preset,
+            "when": rule.when,
+            "hold": rule.dimmer_hold,
+            "hold_ms": rule.dimmer_hold_ms,
+            "speed": rule.dimmer_speed,
+            "min_v": rule.dimmer_min,
+            "fade_on_ms": rule.dimmer_fade_on_ms,
+            "fade_off_ms": rule.dimmer_fade_off_ms,
+        }
+        if rule.action_transition is not None:
+            action["transition"] = rule.action_transition
+        if getattr(rule, "action_delay", None) is not None:
+            action["delay"] = rule.action_delay
+        return action
+
+    def find_rule(self, rule_id: str) -> "LocalLogicRule | None":
+        return next((r for r in self.rules if r.id == rule_id), None)
+
     def evaluate(self, message: dict[str, Any], device_states: dict[str, Any] = None) -> list[dict[str, Any]]:
         """
         Evaluates a WebSocket message against the rules.
@@ -589,28 +618,7 @@ class LocalLogicEngine:
                 self.logger.info(
                     f"Rule '{rule.name}' triggered by {msg_dev} {msg_circuit} ({msg_value}) {rule.trigger_operator} {rule.trigger_value}"
                 )
-                action = {
-                    "type": getattr(rule, "action_type", "set"),
-                    "dev": normalize_dev(rule.action_dev),
-                    "circuit": rule.action_circuit,
-                    "value": rule.action_value,
-                    "trigger_value": msg_value,
-                    "rule_id": rule.id,
-                    "rule_name": rule.name,
-                    "pulse": rule.action_pulse,
-                    "preset": rule.action_preset,
-                    "when": rule.when,
-                    "hold": rule.dimmer_hold,
-                    "hold_ms": rule.dimmer_hold_ms,
-                    "speed": rule.dimmer_speed,
-                    "min_v": rule.dimmer_min,
-                    "fade_on_ms": rule.dimmer_fade_on_ms,
-                    "fade_off_ms": rule.dimmer_fade_off_ms,
-                }
-                if rule.action_transition is not None:
-                    action["transition"] = rule.action_transition
-                if getattr(rule, "action_delay", None) is not None:
-                    action["delay"] = rule.action_delay
+                action = self.action_for(rule, msg_value)
                 actions.append(action)
 
         return actions
@@ -3718,10 +3726,11 @@ class UnipiBridge:
 
     # ---- T17 helpers -----------------------------------------------------------------------------
     def _rec(self, action: dict[str, Any], step: str, ok: bool, detail: str) -> None:
-        self.local_logic.record(
-            action.get("rule_id"), action.get("rule_name"), step, ok, detail,
-            extra={"target": f"{action.get('dev')}/{action.get('circuit')}", "action": action.get("type", "set")},
-        )
+        extra = {"target": f"{action.get('dev')}/{action.get('circuit')}", "action": action.get("type", "set")}
+        if action.get("test"):
+            detail = "TEST: " + detail      # an editor test is never mistaken for a real button press (trace, HA logbook)
+            extra["test"] = True
+        self.local_logic.record(action.get("rule_id"), action.get("rule_name"), step, ok, detail, extra=extra)
 
     def _rule_event_topic(self) -> str:
         return f"{self.config.mqtt.topic}/{self.device_name}/rules/activity"
@@ -3796,6 +3805,40 @@ class UnipiBridge:
             self._rec(action, "rejected", False, f"pulse refused: {e}")
             self.logger.warning(f"Rule pulse on {dev}/{circuit} rejected: {e}")
             self._publish_attributes(dev, circuit, {"last_error": f"rule: {e}"})
+
+    def run_rule_test(self, rule_id: str, mode: str = "tap") -> tuple[int, dict[str, Any]]:
+        """Run the ACTION of a saved rule now, as if its trigger had fired (trigger, conditions and `when` are skipped).
+        mode "tap": a short press; "hold": press, held until the dimming has shown (push-to-dim rules only).
+        Returns (http status, body). Runs on the event loop."""
+        rule = self.local_logic.find_rule(rule_id)
+        if rule is None:
+            return 404, {"error": "rule not found - save the rule first (a test runs the saved version)"}
+        if self.shadow:
+            return 409, {"error": "shadow mode never acts"}
+        if rule_id in self.local_logic.disabled:
+            return 409, {"error": f"rule is disabled: {self.local_logic.disabled[rule_id]}"}
+        if mode not in ("tap", "hold"):
+            return 400, {"error": "mode must be 'tap' or 'hold'"}
+        push_to_dim = rule.action_type == "dimmer" and rule.dimmer_hold
+        if mode == "hold" and not push_to_dim:
+            return 400, {"error": "a hold test only exists for push-to-dim rules"}
+        before = self.local_logic._seq
+        action = self.local_logic.action_for(rule, 1)
+        action["test"] = True
+        action["when"] = "always"
+        self.local_logic.record(rule.id, rule.name, "test", True,
+                                f"TEST ({mode}) started from the editor - trigger and conditions skipped, running the action")
+        self.execute_local_action(action)
+        if push_to_dim:
+            release = dict(action, trigger_value=0)
+            if mode == "tap":
+                self.execute_local_action(release)
+            else:   # hold: let it dim for ~2 s after the hold time, then let go
+                async def let_go():
+                    await self._dim_sleep(rule.dimmer_hold_ms / 1000.0 + 2.0)
+                    self.execute_local_action(release)
+                self.loop.create_task(let_go(), name=f"RuleTestRelease-{rule.id}")
+        return 200, {"ok": True, "mode": mode, "events": self.local_logic.trace_since(before)["events"]}
 
     def validate_rule(self, rule: "LocalLogicRule") -> str | None:
         """None if the rule is usable, else a human-readable reason (it will be disabled, not deleted)."""
@@ -4246,6 +4289,7 @@ class UnipiBridge:
             app.router.add_delete("/api/rules/{rule_id}", self.web_handler_delete_rule)
             app.router.add_get("/api/status", self.web_handler_get_status)
             app.router.add_get("/api/rule_trace", self.web_handler_rule_trace)
+            app.router.add_post("/api/rules/{id}/test", self.web_handler_test_rule)
             app.router.add_get("/api/inputs", self.web_handler_get_inputs)
             app.router.add_post("/api/inputs/{circuit}", self.web_handler_update_input)
 
@@ -4338,6 +4382,18 @@ class UnipiBridge:
         except ValueError:
             since = 0
         return web.json_response(self.local_logic.trace_since(since))
+
+    async def web_handler_test_rule(self, request: web.Request) -> web.Response:
+        """Run the action of a saved rule (editor "Test" button). Acts on the real outputs."""
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        mode = (body.get("mode") if isinstance(body, dict) else None) or "tap"
+        status, result = self.run_rule_test(request.match_info["id"], str(mode))
+        if status == 200:
+            self.logger.info(f"Rule test run from the editor: {request.match_info['id']} ({mode})")
+        return web.json_response(result, status=status)
 
     async def web_handler_get_status(self, request: web.Request) -> web.Response:
         """Returns the current device states."""

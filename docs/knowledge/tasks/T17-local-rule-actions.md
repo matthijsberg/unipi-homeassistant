@@ -111,4 +111,13 @@ Matthijs: with several rules the blocks overlapped / fell off the screen and the
 - Tests: 348 (+31). 19 mutation checks on `web/index.html`; 3 survivors were test gaps (the saved dimmer fade/hold values were masked by the loaded copy of the rule) → tests now edit the block fields and assert the saved values → caught.
 - **Not verified**: a real browser (the fake Blockly cannot judge layout, scale feel or touch pinch). Needs a click-through by Matthijs after a hard refresh (Ctrl+Shift+R).
 
+# Follow-up 2026-10-09 (6): "Test" button — run a rule's action on demand (`rc13`)
+Matthijs asked for a way to run the actions of an automation without waiting for the trigger (e.g. before testing the bell).
+- API `POST /api/rules/<id>/test` (login required, body `{"mode":"tap"|"hold"}`): runs the ACTION of the **saved** rule through exactly the same code path as a real trigger (`LocalLogicEngine.action_for` is now shared), skipping trigger, conditions and the `when` gate. Refused with a reason for: unknown/unsaved rule (404), disabled rule or shadow instance (409), bad mode or `hold` on a non-push-to-dim rule (400).
+- `tap` = a short press (toggle / set / pulse / push-to-dim toggle); `hold` (push-to-dim only) = press, dim for ~2 s after the hold time, then let go by itself.
+- Everything a test does is labelled **"TEST: ..."** in the Rule activity trace and in the HA Logbook event (`test: true`), so it is never mistaken for a real press.
+- Editor: **▶ Test** / **▶ Test hold** in the bar above the canvas; click a rule (or any part of it) first. It asks for confirmation (it really switches the output), refuses while there are unsaved changes (it tests the saved rule) or for rules that are not saved yet, and shows the outcome in the status line plus the activity panel.
+- Tests 370 (+22: 11 backend, 11 executed-editor); 15 mutation checks, 14 caught at once, 1 survivor (the `when` gate was never really closed in my test: HA counted as unreachable because the fake MQTT link was down) → test strengthened → caught.
+- Not verified in a real browser (see follow-up 5).
+
 # Open questions

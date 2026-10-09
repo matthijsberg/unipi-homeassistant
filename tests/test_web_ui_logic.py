@@ -270,3 +270,102 @@ def test_a_rule_without_trigger_or_action_is_not_saved_half_finished():
     ed = Editor(RULES)
     ed.run("workspace.newBlock('unipi_rule')")                                                    # dragged out, nothing connected
     assert [r["id"] for r in ed.save()] == ["a", "b", "c", "d"]
+
+
+# ---- Test button: run the action of the selected, saved rule --------------------------------------------------------------------
+def select(ed, index=0, child=None):
+    rule = "workspace.getTopBlocks(true).filter(b=>b.type==='unipi_rule')[%d]" % index
+    target = rule if child is None else "%s.getInputTargetBlock('%s')" % (rule, child)
+    ed.run("Blockly.selected = %s" % target)
+
+
+def posted(ed):
+    return ed.js("__calls.filter(c=>/\\/test$/.test(c.url)).map(c=>({url:c.url,method:c.method,body:JSON.parse(c.body)}))")
+
+
+def status(ed):
+    return ed.js("[document.getElementById('statusMsg').textContent, document.getElementById('statusMsg').style.color]")
+
+
+def press_test(ed, mode="tap"):
+    ed.run("__calls.length = 0; testRule(%s)" % json.dumps(mode))
+
+
+def test_test_button_posts_the_saved_rule_id_after_confirmation():
+    ed = Editor(RULES)
+    select(ed, 0)
+    press_test(ed)
+    assert posted(ed) == [{"url": "/api/rules/a/test", "method": "POST", "body": {"mode": "tap"}}]
+    assert len(ed.js("__confirms")) == 1 and "Serre Light" in ed.js("__confirms[0]") and "REAL" in ed.js("__confirms[0]")
+
+
+def test_selecting_a_part_of_the_rule_is_enough():
+    ed = Editor(RULES)
+    select(ed, 2, child="ACTION")                                     # clicked the action block inside "Doorbell"
+    press_test(ed)
+    assert [c["url"] for c in posted(ed)] == ["/api/rules/c/test"]
+
+
+def test_hold_mode_is_sent_as_hold():
+    ed = Editor(RULES)
+    select(ed, 1)
+    press_test(ed, "hold")
+    assert posted(ed)[0]["body"] == {"mode": "hold"} and "HOLD" in ed.js("__confirms[0]")
+
+
+def test_declining_the_confirmation_runs_nothing():
+    ed = Editor(RULES)
+    ed.run("__state.confirmAnswer = false")
+    select(ed, 0)
+    press_test(ed)
+    assert posted(ed) == [] and len(ed.js("__confirms")) == 1
+
+
+def test_nothing_selected_asks_to_select_a_rule_and_calls_nothing():
+    ed = Editor(RULES)
+    ed.run("Blockly.selected = null")
+    press_test(ed)
+    assert posted(ed) == [] and ed.js("__confirms") == []
+    msg, color = status(ed)
+    assert "Click a rule" in msg and color != ""
+
+
+def test_a_new_unsaved_rule_cannot_be_tested():
+    ed = Editor(RULES)
+    ed.run("var nb = workspace.newBlock('unipi_rule'); Blockly.selected = nb")
+    press_test(ed)
+    assert posted(ed) == [] and "not saved yet" in status(ed)[0]
+
+
+@pytest.mark.parametrize("edit", [
+    "workspace.getTopBlocks(true).filter(b=>b.type==='unipi_rule')[0].setFieldValue('Renamed','NAME')",
+    "workspace.getTopBlocks(true).filter(b=>b.type==='unipi_rule')[0].getInputTargetBlock('ACTION').setFieldValue('0.9','VALUE')",
+    "workspace.getTopBlocks(true).filter(b=>b.type==='unipi_rule')[3].setFieldValue('x','GROUP')",
+])
+def test_unsaved_edits_block_the_test_until_saved(edit):
+    ed = Editor(RULES)
+    select(ed, 0)
+    ed.run(edit)
+    press_test(ed)
+    assert posted(ed) == [] and "unsaved changes" in status(ed)[0]
+    ed.save()                                                         # saving reloads and re-arms the test
+    select(ed, 0)
+    press_test(ed)
+    assert len(posted(ed)) == 1
+
+
+def test_server_refusal_and_success_are_shown():
+    ed = Editor(RULES)
+    select(ed, 0)
+    ed.run("__state.testStatus = 409; __state.testBody = {error: 'rule is disabled: because'}")
+    press_test(ed)
+    msg, color = status(ed)
+    assert "Test not run" in msg and "rule is disabled: because" in msg and color != ""
+    ed.run("__state.testStatus = 200; __state.testBody = {ok: true, events: [{step:'test',ok:true,detail:'TEST started'},{step:'executed',ok:true,detail:'TEST: set ao/1_01 = 5'}]}")
+    press_test(ed)
+    msg, _ = status(ed)
+    assert "Test started" in msg and "TEST: set ao/1_01 = 5" in msg
+
+
+def test_the_test_buttons_exist_in_the_page():
+    assert "testRule('tap')" in HTML and "testRule('hold')" in HTML
