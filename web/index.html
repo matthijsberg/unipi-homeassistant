@@ -306,6 +306,15 @@
             70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(46, 204, 113, 0); }
             100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(46, 204, 113, 0); }
         }
+        /* Rule activity: flash the rule block that just ran / was stopped */
+        .unipi-flash-hit > .blocklyPath { stroke: #2980b9 !important; stroke-width: 6px !important; }
+        .unipi-flash-ok > .blocklyPath { stroke: #27ae60 !important; stroke-width: 6px !important; }
+        .unipi-flash-stop > .blocklyPath { stroke: #e67e22 !important; stroke-width: 6px !important; }
+        #ruleActivity .row { padding: 3px 0; border-bottom: 1px solid #f0f0f0; word-break: break-word; }
+        #ruleActivity .t { color: #95a5a6; margin-right: 6px; }
+        #ruleActivity .nm { font-weight: 600; color: #2c3e50; }
+        #ruleActivity .bad { color: #c0392b; }
+        #ruleActivity .good { color: #1e8449; }
     </style>
 </head>
 
@@ -420,6 +429,13 @@
                         Waiting for data...
                     </div>
                 </div>
+                <div style="border-top: 1px solid #ddd; background: #fafafa; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center;">
+                    <span style="font-weight: bold; font-size: 0.9rem; color: #2c3e50;">Rule activity</span>
+                    <button id="clearActivityBtn" style="font-size: 0.75rem; padding: 2px 8px; cursor: pointer;">clear</button>
+                </div>
+                <div id="ruleActivity" style="height: 280px; overflow-y: auto; padding: 6px 10px; font-size: 0.78rem; line-height: 1.35; background: white;">
+                    <div class="hint" style="color: #95a5a6;">No rule activity yet. Press a button that is wired to a rule: every step shows up here.</div>
+                </div>
             </div>
         </div>
 
@@ -457,7 +473,7 @@
                     this.appendDummyInput()
                         .appendField("Device")
                         .appendField(new Blockly.FieldDropdown([
-                            ["Digital Input", "input"],
+                            ["Digital Input", "di"],
                             ["Temperature", "temp"],
                             ["Analog Input", "ai"]
                         ]), "DEV");
@@ -489,11 +505,11 @@
                     this.appendDummyInput()
                         .appendField("AND Device")
                         .appendField(new Blockly.FieldDropdown([
-                            ["Digital Input", "input"],
-                            ["Relay", "relay"],
-                            ["Digital Output", "output"],
+                            ["Digital Input", "di"],
+                            ["Relay", "ro"],
+                            ["Digital Output", "do"],
                             ["Analog Input", "ai"],
-                            ["Analog Output", "analogoutput"],
+                            ["Analog Output", "ao"],
                             ["Temperature", "temp"],
                             ["LED", "led"]
                         ]), "DEV");
@@ -525,16 +541,16 @@
                     this.appendDummyInput()
                         .appendField("Set Device")
                         .appendField(new Blockly.FieldDropdown([
-                            ["Relay", "relay"],
-                            ["Digital Output", "output"],
-                            ["Analog Output", "analogoutput"],
+                            ["Relay", "ro"],
+                            ["Digital Output", "do"],
+                            ["Analog Output", "ao"],
                             ["LED", "led"]
                         ]), "DEV");
                     this.appendDummyInput()
                         .appendField("Circuit")
                         .appendField(new Blockly.FieldTextInput("1_01"), "CIRCUIT");
                     this.appendDummyInput()
-                        .appendField("To Value")
+                        .appendField("To Value (analog 0-10 V; relay/LED 1 or 0)")
                         .appendField(new Blockly.FieldTextInput("1"), "VALUE");
                     this.appendDummyInput()
                         .appendField("Transition (ms)")
@@ -636,6 +652,10 @@
 
             const API_URL = '/api/rules';
 
+            // Rules saved by older versions use evok-2 device names; evok 3 (and the bridge) use these.
+            const LEGACY_DEV = { input: 'di', relay: 'ro', output: 'do', analogoutput: 'ao' };
+            function canonDev(dev) { return LEGACY_DEV[dev] || dev; }
+
             function showStatus(msg, isError = false) {
                 const el = document.getElementById('statusMsg');
                 el.textContent = msg;
@@ -656,6 +676,7 @@
                     // so saving here can never silently erase them.
                     let base = {};
                     try { base = block.data ? JSON.parse(block.data) : {}; } catch (e) { base = {}; }
+                    delete base.disabled_reason;   // computed by the bridge, never saved
 
                     // Get Trigger
                     const triggerBlock = block.getInputTargetBlock('TRIGGER');
@@ -764,8 +785,11 @@
 
                     if (res.ok) {
                         showStatus("Rules saved successfully!");
+                        await loadRules();   // pick up ids assigned by the bridge
                     } else {
-                        showStatus("Error saving rules.", true);
+                        let why = "";
+                        try { why = (await res.json()).error || ""; } catch (e) { /* not JSON */ }
+                        showStatus("Rules NOT saved: " + (why || "error saving rules."), true);
                     }
                 } catch (e) {
                     console.error(e);
@@ -793,13 +817,16 @@
                         ruleBlock.setFieldValue(rule.name, 'NAME');
                         ruleBlock.setFieldValue(rule.when || 'always', 'WHEN');
                         ruleBlock.data = JSON.stringify(rule);   // keep the full rule (id, unknown fields) for saving
+                        if (rule.disabled_reason) {
+                            ruleBlock.setWarningText("DISABLED - this rule does nothing until fixed: " + rule.disabled_reason);
+                        }
                         ruleBlock.initSvg();
                         ruleBlock.render();
                         ruleBlock.moveBy(20, y);
 
                         // Create Trigger Block
                         const triggerBlock = workspace.newBlock('unipi_trigger');
-                        triggerBlock.setFieldValue(rule.trigger_dev, 'DEV');
+                        triggerBlock.setFieldValue(canonDev(rule.trigger_dev), 'DEV');
                         triggerBlock.setFieldValue(rule.trigger_circuit, 'CIRCUIT');
                         triggerBlock.setFieldValue(rule.trigger_operator || 'eq', 'OP');
                         triggerBlock.setFieldValue(String(rule.trigger_value), 'VALUE');
@@ -815,7 +842,7 @@
                             for (let i = 0; i < rule.conditions.length; i++) {
                                 const cond = rule.conditions[i];
                                 const condBlock = workspace.newBlock('unipi_condition');
-                                condBlock.setFieldValue(cond.dev, 'DEV');
+                                condBlock.setFieldValue(canonDev(cond.dev), 'DEV');
                                 condBlock.setFieldValue(cond.circuit, 'CIRCUIT');
                                 condBlock.setFieldValue(cond.operator || 'eq', 'OP');
                                 condBlock.setFieldValue(String(cond.value), 'VALUE');
@@ -840,7 +867,7 @@
                             actionBlock.setFieldValue(rule.dimmer_hold === false ? 'FALSE' : 'TRUE', 'HOLD');
                         } else if (rule.action_type === 'pulse') {
                             actionBlock = workspace.newBlock('unipi_action_pulse');
-                            actionBlock.setFieldValue(rule.action_dev, 'DEV');
+                            actionBlock.setFieldValue(canonDev(rule.action_dev), 'DEV');
                             actionBlock.setFieldValue(rule.action_circuit, 'CIRCUIT');
                             actionBlock.setFieldValue(rule.action_preset || '', 'PRESET');
                             if (rule.action_pulse) {
@@ -850,11 +877,11 @@
                             }
                         } else if (rule.action_type === 'toggle') {
                             actionBlock = workspace.newBlock('unipi_action_toggle');
-                            actionBlock.setFieldValue(rule.action_dev, 'DEV');
+                            actionBlock.setFieldValue(canonDev(rule.action_dev), 'DEV');
                             actionBlock.setFieldValue(rule.action_circuit, 'CIRCUIT');
                         } else {
                             actionBlock = workspace.newBlock('unipi_action');
-                            actionBlock.setFieldValue(rule.action_dev, 'DEV');
+                            actionBlock.setFieldValue(canonDev(rule.action_dev), 'DEV');
                             actionBlock.setFieldValue(rule.action_circuit, 'CIRCUIT');
                             actionBlock.setFieldValue(String(rule.action_value), 'VALUE');
                             actionBlock.setFieldValue(rule.action_transition || 0, 'TRANSITION');
@@ -1252,12 +1279,9 @@
             }
 
             function evaluateTriggerInJS(dev, circuit, op, expectedVal, states) {
-                let key = `${dev}_${circuit}`;
-                let val = states[key];
-                if (val === undefined) {
-                    if (dev === 'input') val = states[`di_${circuit}`];
-                    else if (dev === 'temp') val = states[`1wdevice_${circuit}_temp`];
-                }
+                let val = states[`${canonDev(dev)}_${circuit}`];
+                if (val === undefined) val = states[`${dev}_${circuit}`];
+                if (val === undefined && dev === 'temp') val = states[`1wdevice_${circuit}_temp`];
                 if (val === undefined) return false;
                 
                 let actual = val;
@@ -1294,8 +1318,79 @@
                 }
             }
 
+            // --- Rule activity: what the bridge saw, which rule matched, what it did (server-side trace) ---
+            let traceSince = 0;
+
+            function traceIcon(e) {
+                switch (e.step) {
+                    case 'executed': return '\u2705';
+                    case 'trigger': return e.ok ? '\u25B6\uFE0F' : '\u25CB';
+                    case 'conditions': return '\u26D4';
+                    case 'gated': return '\u23ED\uFE0F';
+                    case 'delayed': return '\u23F3';
+                    case 'shadow': return '\uD83D\uDC7B';
+                    default: return '\u26A0\uFE0F';   // disabled, rejected, error
+                }
+            }
+
+            function flashRuleBlock(ruleId, cls) {
+                if (!ruleId) return;
+                workspace.getTopBlocks(false).forEach(block => {
+                    if (block.type !== 'unipi_rule' || !block.data) return;
+                    let id = null;
+                    try { id = JSON.parse(block.data).id; } catch (e) { return; }
+                    if (id !== ruleId || !block.svgGroup_) return;
+                    block.svgGroup_.classList.add(cls);
+                    setTimeout(() => block.svgGroup_.classList.remove(cls), 1800);
+                });
+            }
+
+            function addActivityRow(e) {
+                const box = document.getElementById('ruleActivity');
+                const hint = box.querySelector('.hint');
+                if (hint) hint.remove();
+                const row = document.createElement('div');
+                row.className = 'row';
+                const t = document.createElement('span');
+                t.className = 't';
+                t.textContent = new Date(e.ts * 1000).toLocaleTimeString();
+                const nm = document.createElement('span');
+                nm.className = 'nm';
+                nm.textContent = (e.rule || 'rule') + ' ';
+                const icon = document.createElement('span');
+                icon.textContent = traceIcon(e) + ' ';
+                const detail = document.createElement('span');
+                detail.className = e.ok ? 'good' : (e.step === 'trigger' ? '' : 'bad');
+                detail.textContent = e.detail;
+                row.append(t, icon, nm, detail);
+                box.insertBefore(row, box.firstChild);
+                while (box.children.length > 80) box.removeChild(box.lastChild);
+                if (e.step === 'executed') flashRuleBlock(e.rule_id, 'unipi-flash-ok');
+                else if (e.step === 'trigger' && e.ok) flashRuleBlock(e.rule_id, 'unipi-flash-hit');
+                else if (e.step !== 'trigger') flashRuleBlock(e.rule_id, 'unipi-flash-stop');
+            }
+
+            async function pollRuleTrace() {
+                if (document.getElementById("app").style.display === "none") return;
+                try {
+                    const res = await fetch('/api/rule_trace?since=' + traceSince);
+                    if (!res.ok) return;
+                    const data = await res.json();
+                    if (data.last < traceSince) traceSince = 0;   // the bridge restarted: start over
+                    else traceSince = data.last;
+                    data.events.forEach(addActivityRow);
+                } catch (e) {
+                    console.error("Rule trace poll error:", e);
+                }
+            }
+
+            document.getElementById('clearActivityBtn').addEventListener('click', () => {
+                document.getElementById('ruleActivity').innerHTML = '';
+            });
+
             // Start polling loop every 1 second
             setInterval(pollLiveStates, 1000);
+            setInterval(pollRuleTrace, 1000);
         </script>
     </div> <!-- End of #app -->
 </body>
