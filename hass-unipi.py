@@ -86,7 +86,7 @@ else:
     print("Required libraries check passed.")
 
 # --- Script Version ---
-SCRIPT_VERSION = "2.2.0-rc11"
+SCRIPT_VERSION = "2.2.0-rc12"
 
 # --- Constants ---
 # Last discovered device name, so the MQTT last-will can use the device's own
@@ -391,6 +391,7 @@ class LocalLogicRule(BaseModel):
     dimmer_min: float = 1.0                      # dimming down stops here (lamp stays on); a short press switches off
     dimmer_fade_on_ms: int = 0                   # a tap that switches the lamp ON fades up over this long (0 = instant)
     dimmer_fade_off_ms: int = 0                  # a tap that switches the lamp OFF fades down over this long (0 = instant)
+    group: str = ""                              # editor tab this rule is shown under (organisation only)
 
 
 
@@ -3801,6 +3802,8 @@ class UnipiBridge:
         t = rule.action_type
         if t not in ("set", "dimmer", "toggle", "pulse"):
             return f"unknown action_type '{t}'"
+        if len(rule.group) > 40:
+            return "the group name may be at most 40 characters"
         if rule.when not in ("always", "ha_offline"):
             return f"'when' must be 'always' or 'ha_offline', got '{rule.when}'"
         if not rule.trigger_dev or not rule.trigger_circuit:

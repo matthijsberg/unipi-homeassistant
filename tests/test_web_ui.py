@@ -83,3 +83,63 @@ def test_the_ha_fallback_selector_is_gone_but_existing_rules_keep_their_setting(
 def test_push_to_dim_block_is_discoverable_and_tells_the_truth_about_the_trigger():
     assert "Push-to-dim light" in HTML and "follows press and release" in HTML
     assert "(actionType === 'dimmer' && dimmerHold) ? 'any' : triggerOp" in SCRIPT
+
+
+# ---- zoom, group tabs, pinned local Blockly (T17f) --------------------------------------------------------------------------
+import hashlib  # noqa: E402
+
+STATIC = Path(__file__).resolve().parent.parent / "web" / "static"
+BLOCKLY = STATIC / "blockly-13.3.0.min.js"
+
+
+def test_blockly_is_pinned_and_served_from_this_box():
+    assert '<script src="/static/blockly-13.3.0.min.js"></script>' in HTML
+    assert "unpkg.com/blockly/blockly" not in HTML and "https://unpkg.com" not in SCRIPT      # nothing is fetched from the internet
+    data = BLOCKLY.read_bytes()
+    assert len(data) > 500_000
+    notice = (STATIC / "BLOCKLY-NOTICE.txt").read_text()
+    assert hashlib.sha256(data).hexdigest() in notice and "13.3.0" in notice and "Apache" in notice
+
+
+def test_every_blockly_function_the_editor_relies_on_exists_in_the_pinned_build():
+    js = BLOCKLY.read_text(encoding="utf-8", errors="ignore")
+    for name in ("zoomToFit", "setCollapsed", "getHeightWidth", "getRelativeToSurfaceXY", "getSvgRoot", "moveBy", "getTopBlocks",
+                 "getBlockById", "setWarningText", "BLOCK_CHANGE", "BLOCK_CREATE", "scaleSpeed", "startScale", "maxScale", "minScale", "pinch"):
+        assert name in js, name
+
+
+def test_the_editor_never_calls_the_block_setvisible_that_blockly_13_does_not_have():
+    assert not re.search(r"(block|b|root)\.setVisible\(", SCRIPT)          # hiding is done on the SVG element instead
+    assert "root.style.display = show ? '' : 'none'" in SCRIPT
+
+
+def test_zoom_is_enabled_with_controls_and_ctrl_wheel():
+    assert re.search(r"zoom:\s*\{[^}]*controls:\s*true[^}]*wheel:\s*true[^}]*pinch:\s*true", SCRIPT)
+    assert "move: { scrollbars: true, drag: true, wheel: true }" in SCRIPT
+
+
+def test_view_bar_has_tabs_search_and_the_four_helpers():
+    for el in ('id="viewBar"', 'id="groupTabs"', 'id="ruleSearch"', "arrangeRules()", "zoomFit()", "collapseRules(true)", "collapseRules(false)"):
+        assert el in HTML, el
+    for fn in ("function rebuildTabs", "function applyView", "function arrangeRules", "function zoomFit", "function collapseRules"):
+        assert fn in SCRIPT, fn
+
+
+def test_tabs_only_hide_rules_so_saving_still_saves_everything():
+    save = re.search(r"async function saveRules\(\) \{(.*?)\n            \}\n", SCRIPT, re.S).group(1)
+    assert "getTopBlocks(false)" in save and "display" not in save and "activeGroup" not in save      # save ignores what is shown
+    assert "group: group" in save and "GROUP" in save
+
+
+def test_group_names_are_never_injected_as_html():
+    body = re.search(r"function rebuildTabs\(\) \{(.*?)\n            \}\n", SCRIPT, re.S).group(1)
+    assert "innerHTML" not in body and body.count("textContent") >= 3
+
+
+def test_load_keeps_the_saved_order_and_restores_groups():
+    assert "ruleBlock.unipiOrder = nextOrder++" in SCRIPT and "nextOrder = 0;" in SCRIPT
+    assert "ruleBlock.setFieldValue(rule.group || '', 'GROUP')" in SCRIPT
+
+
+def test_new_rule_joins_the_open_tab():
+    assert "Blockly.Events.BLOCK_CREATE" in SCRIPT and "b.setFieldValue(activeGroup, 'GROUP')" in SCRIPT

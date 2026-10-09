@@ -5,7 +5,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Unipi Local Logic - Blockly</title>
-    <script src="https://unpkg.com/blockly/blockly.min.js"></script>
+    <!-- Blockly 13.3.0, pinned and served from this box (see static/BLOCKLY-NOTICE.txt) -->
+    <script src="/static/blockly-13.3.0.min.js"></script>
     <style>
         body {
             font-family: 'Segoe UI', sans-serif;
@@ -315,6 +316,14 @@
         #ruleActivity .nm { font-weight: 600; color: #2c3e50; }
         #ruleActivity .bad { color: #c0392b; }
         #ruleActivity .good { color: #1e8449; }
+        /* View bar: group tabs, search, zoom helpers */
+        #viewBar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 6px 14px; background: #f4f6f8; border-bottom: 1px solid #d5dbe0; }
+        #groupTabs { display: flex; gap: 4px; flex-wrap: wrap; }
+        #groupTabs button { border: 1px solid #c3ccd4; background: white; color: #2c3e50; padding: 4px 12px; border-radius: 14px; cursor: pointer; font-size: 0.85rem; }
+        #groupTabs button.active { background: #34495e; color: white; border-color: #34495e; }
+        #groupTabs .count { opacity: 0.65; margin-left: 4px; font-size: 0.75rem; }
+        #viewBar input[type=search] { padding: 4px 10px; border: 1px solid #c3ccd4; border-radius: 4px; min-width: 200px; }
+        #viewBar .tools button { padding: 4px 10px; margin-left: 4px; cursor: pointer; }
     </style>
 </head>
 
@@ -412,6 +421,18 @@
             </div>
         </div>
 
+        <div id="viewBar">
+            <div id="groupTabs"></div>
+            <input id="ruleSearch" type="search" placeholder="Search rule / circuit..." oninput="applyView()">
+            <span style="flex: 1;"></span>
+            <span class="tools">
+                <button onclick="arrangeRules()" title="Stack the visible rules neatly, nothing overlaps">Arrange</button>
+                <button onclick="zoomFit()" title="Zoom so that everything fits on screen">Fit</button>
+                <button onclick="collapseRules(true)" title="Show each rule as one line">Collapse all</button>
+                <button onclick="collapseRules(false)">Expand all</button>
+            </span>
+        </div>
+
         <div style="display: flex; flex-grow: 1; min-height: 0; width: 100%;">
             <div id="blocklyDiv" style="flex-grow: 1; height: 100%;"></div>
             <div id="liveStatesPanel" style="width: 280px; border-left: 1px solid #ddd; background: white; display: flex; flex-direction: column; overflow: hidden; box-shadow: -2px 0 5px rgba(0,0,0,0.05);">
@@ -447,6 +468,9 @@
                     this.appendDummyInput()
                         .appendField("Rule Name:")
                         .appendField(new Blockly.FieldTextInput("My Rule"), "NAME");
+                    this.appendDummyInput()
+                        .appendField("Group (tab)")
+                        .appendField(new Blockly.FieldTextInput(""), "GROUP");
                     this.appendValueInput("TRIGGER")
                         .setCheck("Trigger")
                         .appendField("IF");
@@ -657,12 +681,20 @@
                     ]
                 },
                 scrollbars: true,
+                move: { scrollbars: true, drag: true, wheel: true },        // wheel scrolls; Ctrl/Cmd+wheel or pinch zooms
+                zoom: { controls: true, wheel: true, pinch: true, startScale: 0.85, minScale: 0.25, maxScale: 2, scaleSpeed: 1.2 },
                 trashcan: true
             });
 
             // --- Logic ---
 
             const API_URL = '/api/rules';
+
+            // View state. Declared up here on purpose: loadRules() runs early and reads these before the
+            // view code further down is reached (a `let` below would still be uninitialised: empty editor).
+            const NO_GROUP = '\u0000none';
+            let activeGroup = '*';
+            let nextOrder = 0;
 
             // Rules saved by older versions use evok-2 device names; evok 3 (and the bridge) use these.
             const LEGACY_DEV = { input: 'di', relay: 'ro', output: 'do', analogoutput: 'ao' };
@@ -683,6 +715,7 @@
                     if (block.type !== 'unipi_rule') continue;
 
                     const name = block.getFieldValue('NAME');
+                    const group = (block.getFieldValue('GROUP') || '').trim();
                     // Fields this editor has no block for (and the rule id) are carried through unchanged,
                     // so saving here can never silently erase them.
                     let base = {};
@@ -772,6 +805,7 @@
 
                     rules.push(Object.assign({}, base, {
                         name: name,
+                        group: group,
                         action_pulse: actionPulse,
                         action_preset: actionPreset,
                         dimmer_hold: dimmerHold,
@@ -825,6 +859,7 @@
 
             async function loadRules() {
                 workspace.clear();
+                nextOrder = 0;
                 try {
                     const response = await fetch(API_URL);
                     if (response.status === 401) {
@@ -840,7 +875,9 @@
                     for (const rule of rules) {
                         // Create Rule Block
                         const ruleBlock = workspace.newBlock('unipi_rule');
+                        ruleBlock.unipiOrder = nextOrder++;      // the order the rules were saved in
                         ruleBlock.setFieldValue(rule.name, 'NAME');
+                        ruleBlock.setFieldValue(rule.group || '', 'GROUP');
                         ruleBlock.data = JSON.stringify(rule);   // keep the full rule (id, unknown fields) for saving
                         if (rule.disabled_reason) {
                             ruleBlock.setWarningText("DISABLED - this rule does nothing until fixed: " + rule.disabled_reason);
@@ -925,6 +962,8 @@
 
                         y += 220; // Spacing (increased to accommodate conditions block stack)
                     }
+                    rebuildTabs();
+                    applyView();
                     showStatus("Rules loaded.");
                 } catch (e) {
                     console.error(e);
@@ -1141,6 +1180,90 @@
             // Check auth on load
             checkAuth();
 
+            // --- View: group tabs, search, arrange, zoom --------------------------------------------------
+            // Tabs and search only HIDE rules (their SVG element); the blocks stay in the workspace, so saving
+            // always saves every rule, whatever is shown.
+            function blockRoot(block) { return block.getSvgRoot ? block.getSvgRoot() : block.svgGroup_; }
+
+            function ruleBlocks() {
+                const blocks = workspace.getTopBlocks(true).filter(b => b.type === 'unipi_rule');
+                blocks.forEach(b => { if (b.unipiOrder === undefined) b.unipiOrder = nextOrder++; });   // keep a stable order
+                return blocks.sort((a, b) => a.unipiOrder - b.unipiOrder);
+            }
+
+            function groupOf(block) { return (block.getFieldValue('GROUP') || '').trim(); }
+
+            function ruleText(block) {
+                let text = '';
+                try { text = block.toString(); } catch (e) { text = block.getFieldValue('NAME') || ''; }
+                return (text + ' ' + groupOf(block)).toLowerCase();
+            }
+
+            function rebuildTabs() {
+                const bar = document.getElementById('groupTabs');
+                const counts = {};
+                let ungrouped = 0;
+                const blocks = ruleBlocks();
+                blocks.forEach(b => { const g = groupOf(b); if (g) counts[g] = (counts[g] || 0) + 1; else ungrouped++; });
+                const names = Object.keys(counts).sort((a, b) => a.localeCompare(b));
+                if (activeGroup !== '*' && activeGroup !== NO_GROUP && !(activeGroup in counts)) activeGroup = '*';
+                if (activeGroup === NO_GROUP && !(ungrouped && names.length)) activeGroup = '*';
+                bar.textContent = '';
+                function addTab(label, key, count) {
+                    const btn = document.createElement('button');
+                    btn.className = key === activeGroup ? 'active' : '';
+                    btn.textContent = label;                       // group names come from users: text only, never HTML
+                    const c = document.createElement('span');
+                    c.className = 'count';
+                    c.textContent = String(count);
+                    btn.appendChild(c);
+                    btn.onclick = () => { activeGroup = key; rebuildTabs(); applyView(); };
+                    bar.appendChild(btn);
+                }
+                addTab('All', '*', blocks.length);
+                names.forEach(n => addTab(n, n, counts[n]));
+                if (ungrouped && names.length) addTab('No group', NO_GROUP, ungrouped);
+            }
+
+            function applyView() {
+                const q = (document.getElementById('ruleSearch').value || '').trim().toLowerCase();
+                let y = 20;
+                ruleBlocks().forEach(block => {
+                    const g = groupOf(block);
+                    const inGroup = activeGroup === '*' || (activeGroup === NO_GROUP ? g === '' : g === activeGroup);
+                    const show = inGroup && (!q || ruleText(block).includes(q));
+                    const root = blockRoot(block);
+                    if (root) root.style.display = show ? '' : 'none';
+                    const xy = block.getRelativeToSurfaceXY();
+                    block.moveBy(20 - xy.x, y - xy.y);             // hidden rules are parked in the same column, out of sight
+                    if (show) y += block.getHeightWidth().height + 30;
+                });
+            }
+
+            function arrangeRules() { applyView(); }
+            function zoomFit() { applyView(); workspace.zoomToFit(); }
+            function collapseRules(flag) {
+                ruleBlocks().forEach(b => b.setCollapsed(flag));
+                setTimeout(applyView, 80);                         // heights change after the re-render
+            }
+
+            // A new rule created while a group tab is open joins that group; renaming a group updates the tabs.
+            workspace.addChangeListener(ev => {
+                try {
+                    if (ev.type === Blockly.Events.BLOCK_CHANGE && ev.element === 'field' && ev.name === 'GROUP') {
+                        rebuildTabs(); applyView();
+                    } else if (ev.type === Blockly.Events.BLOCK_CREATE && ev.ids) {
+                        ev.ids.forEach(id => {
+                            const b = workspace.getBlockById(id);
+                            if (b && b.type === 'unipi_rule' && !groupOf(b) && activeGroup !== '*' && activeGroup !== NO_GROUP) {
+                                b.setFieldValue(activeGroup, 'GROUP');
+                            }
+                        });
+                        rebuildTabs();
+                    }
+                } catch (e) { console.error('view listener:', e); }
+            });
+
             // --- Live State Polling & Workspace Diagnostics ---
             let previousStates = {};
 
@@ -1276,13 +1399,13 @@
                         
                         if (isSatisfied) {
                             block.setCommentText(`✅ Condition MET`);
-                            if (block.svgGroup_) {
-                                block.svgGroup_.classList.add('blocklySelected');
+                            if (blockRoot(block)) {
+                                blockRoot(block).classList.add('blocklySelected');
                             }
                         } else {
                             block.setCommentText(null);
-                            if (block.svgGroup_) {
-                                block.svgGroup_.classList.remove('blocklySelected');
+                            if (blockRoot(block)) {
+                                blockRoot(block).classList.remove('blocklySelected');
                             }
                         }
                     } else if (block.type === 'unipi_condition') {
@@ -1295,13 +1418,13 @@
                         
                         if (isSatisfied) {
                             block.setCommentText(`✅ Condition MET`);
-                            if (block.svgGroup_) {
-                                block.svgGroup_.classList.add('blocklySelected');
+                            if (blockRoot(block)) {
+                                blockRoot(block).classList.add('blocklySelected');
                             }
                         } else {
                             block.setCommentText(null);
-                            if (block.svgGroup_) {
-                                block.svgGroup_.classList.remove('blocklySelected');
+                            if (blockRoot(block)) {
+                                blockRoot(block).classList.remove('blocklySelected');
                             }
                         }
                     }
@@ -1369,9 +1492,9 @@
                     if (block.type !== 'unipi_rule' || !block.data) return;
                     let id = null;
                     try { id = JSON.parse(block.data).id; } catch (e) { return; }
-                    if (id !== ruleId || !block.svgGroup_) return;
-                    block.svgGroup_.classList.add(cls);
-                    setTimeout(() => block.svgGroup_.classList.remove(cls), 1800);
+                    if (id !== ruleId || !blockRoot(block)) return;
+                    blockRoot(block).classList.add(cls);
+                    setTimeout(() => blockRoot(block).classList.remove(cls), 1800);
                 });
             }
 

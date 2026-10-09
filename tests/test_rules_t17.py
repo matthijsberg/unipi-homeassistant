@@ -244,3 +244,16 @@ def test_shipped_example_rules_are_valid(b, mod):
     b.config.circuits = {}                                            # defaults only
     for item in data:
         assert b.validate_rule(mod.LocalLogicRule(**item)) is None, item["name"]
+
+
+def test_rule_group_is_kept_through_the_api_and_limited(b, mod, tmp_path):
+    r = rule(mod, name="g", group="Serre")
+    assert b.validate_rule(r) is None
+    resp = run(b, b.web_handler_update_rules(req([r.model_dump()])))
+    assert resp.status == 200
+    saved = json.loads((tmp_path / "local_rules.json").read_text())
+    assert saved[0]["group"] == "Serre"
+    shown = json.loads(run(b, b.web_handler_get_rules(SimpleNamespace())).text)
+    assert shown[0]["group"] == "Serre"
+    assert "40 characters" in b.validate_rule(rule(mod, name="long", group="x" * 41))
+    assert rule(mod, name="old").group == ""                           # rules saved before groups existed still load
