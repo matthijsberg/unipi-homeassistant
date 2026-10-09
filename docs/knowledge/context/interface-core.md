@@ -139,6 +139,12 @@ Circuit names are placeholders until the L513 evok-3 map exists (T31).
 | `toggle` **[NEW]** | – | flip a digital output |
 | `pulse` **[NEW]** | `action_pulse: {count,on_ms,off_ms}` or `action_preset` | runs §2 sequence (same engine, same limits) |
 
+# 5b. Rule activity events **[IMPLEMENTED T17d]**
+
+Discovery `homeassistant/event/<device>/rule_activity/config` (retained): MQTT `event` entity "Rule activity", `event_types` = rule names + `other`,
+`state_topic` = `unipi/<device>/rules/activity`. Event payload (not retained): `{"event_type": "<rule name>", "rule", "detail", "target", "action"}`,
+sent only when a rule action really ran.
+
 # 6. Modes **[IMPLEMENTED T18 — with a device-name suffix instead of a different root, see T18 evidence]**
 
 `"mode": "live" | "shadow"` (default `live`). Shadow = read-only twin for safe testing next

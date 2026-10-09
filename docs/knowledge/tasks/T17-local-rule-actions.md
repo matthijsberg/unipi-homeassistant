@@ -90,4 +90,11 @@ Matthijs: on/off works; push-and-hold must dim like a Z-Wave dimmer, he could no
 - Editor: block renamed "Push-to-dim light", fields for hold time / speed / lowest level; the "Runs: only when HA is unreachable" selector is removed from the editor (Matthijs: each function lives either in the Unipi or in HA, no automatic fallback). The `when` setting still exists in the rule JSON and is preserved if a rule has it.
 - Tests: 293 (+22); 11 mutation checks, 9 caught at once, 1 equivalent mutant (redundant branch, same behaviour), 1 real gap (final ack) → test strengthened → caught.
 
+# Follow-up 2026-10-09 (3): "who switches this light?" → HA logbook events (`rc10`)
+Matthijs wanted to stop searching HA for who switches a lamp and chose **the Logbook message** from the options (attributes on entities, an overview page and double-control warnings were offered and not chosen — available if wanted later).
+- One MQTT `event` entity **"Rule activity"** on the Unipi device (same device as the lights; the existing "Visit" link there opens the Unipi editor). Its `event_types` are the **rule names** (+ `other`), so the Logbook line names the rule that acted. The bridge re-publishes the discovery whenever rules are saved/renamed (HA rejects undeclared types, hence the `other` fallback).
+- An event is sent **only when a rule action really ran** (set / toggle / pulse started / dimmer toggled / dimming stopped), never for no-match, failed condition, disabled, gated or shadow. Payload: `event_type`, `rule`, `detail` (what was sent), `target` (e.g. `ao/1_01`), `action`. Topic `unipi/<device>/rules/activity`, **never retained** (no replay after a restart). A failing event callback cannot disturb the rule.
+- Trace entries now carry `target`/`action` too (visible via `/api/rule_trace`).
+- Tests: 303 (+10); 9 mutation checks, 8 caught at once, 1 real test gap (callback failure was silently swallowed elsewhere) → test strengthened → caught.
+
 # Open questions
