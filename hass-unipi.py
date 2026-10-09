@@ -86,7 +86,7 @@ else:
     print("Required libraries check passed.")
 
 # --- Script Version ---
-SCRIPT_VERSION = "2.2.0-rc10"
+SCRIPT_VERSION = "2.2.0-rc11"
 
 # --- Constants ---
 # Last discovered device name, so the MQTT last-will can use the device's own
@@ -389,6 +389,8 @@ class LocalLogicRule(BaseModel):
     dimmer_hold_ms: int = 500                    # how long to hold before dimming starts (short press = toggle)
     dimmer_speed: float = 2.5                    # volts per second while dimming (2.5 = full range in 4 s)
     dimmer_min: float = 1.0                      # dimming down stops here (lamp stays on); a short press switches off
+    dimmer_fade_on_ms: int = 0                   # a tap that switches the lamp ON fades up over this long (0 = instant)
+    dimmer_fade_off_ms: int = 0                  # a tap that switches the lamp OFF fades down over this long (0 = instant)
 
 
 
@@ -601,6 +603,8 @@ class LocalLogicEngine:
                     "hold_ms": rule.dimmer_hold_ms,
                     "speed": rule.dimmer_speed,
                     "min_v": rule.dimmer_min,
+                    "fade_on_ms": rule.dimmer_fade_on_ms,
+                    "fade_off_ms": rule.dimmer_fade_off_ms,
                 }
                 if rule.action_transition is not None:
                     action["transition"] = rule.action_transition
@@ -3843,6 +3847,9 @@ class UnipiBridge:
                 return f"dimmer speed must be 0.2-10 volts per second, got {rule.dimmer_speed}"
             if not 0 <= rule.dimmer_min <= 5:
                 return f"dimmer minimum level must be 0-5 V, got {rule.dimmer_min}"
+            for label, ms in (("fade-on", rule.dimmer_fade_on_ms), ("fade-off", rule.dimmer_fade_off_ms)):
+                if not 0 <= ms <= 60000:
+                    return f"dimmer {label} time must be 0-60000 ms, got {ms}"
         return None
 
     def _load_dimmer_state(self) -> dict[str, dict[str, Any]]:
@@ -4104,11 +4111,32 @@ class UnipiBridge:
             target_val = state.get("previous_level") or level
             if target_val <= 0.0:
                 target_val = level
-        self.commands.send_ws(dev, circuit, target_val)
-        self.mqtt_ack(str(int(target_val * 100)), dev, circuit, origin="rule")
+        fade_ms = int((action or {}).get("fade_on_ms" if target_val > 0 else "fade_off_ms", 0) or 0)
+        if fade_ms > 0:
+            # Fade like a "Set device ... transition": HA shows the wanted end state at once, the lamp follows.
+            self.mqtt_ack(str(int(target_val * 100)), dev, circuit, origin="rule")
+            self._start_ao_fade(dev, circuit, target_val, fade_ms / 1000.0, "DimmerFade")
+        else:
+            self.active_ao_transitions.pop((dev, circuit), None)   # an instant change cancels a fade in progress
+            self.commands.send_ws(dev, circuit, target_val)
+            self.mqtt_ack(str(int(target_val * 100)), dev, circuit, origin="rule")
         self._save_dimmer_state()
         if action:
-            self._rec(action, "executed", True, f"dimmer {dev}/{circuit} -> {target_val:g} V")
+            how = f" (fading over {fade_ms} ms)" if fade_ms > 0 else ""
+            self._rec(action, "executed", True, f"dimmer {dev}/{circuit} -> {target_val:g} V{how}")
+
+    def _start_ao_fade(self, dev: str, circuit: str, target_v: float, seconds: float, name: str) -> None:
+        """Start (replacing any running one) a fade of an analog output to target_v volts."""
+        try:
+            current = int(float(self.device_states.get(f"{dev}_{circuit}", 0)) * 100)
+        except (ValueError, TypeError):
+            current = 0
+        desired = int(round(target_v * 100))
+        self.active_ao_transitions[(dev, circuit)] = desired
+        self.loop.create_task(
+            self._perform_ao_transition_task(dev, circuit, desired, current, seconds, (dev, circuit), desired),
+            name=f"{name}-{dev}-{circuit}",
+        )
 
     async def _dimmer_hold_task(self, rule_id: str, dev: str, circuit: str, hold_ms: int = 500,
                                 speed: float = 2.5, min_v: float = 1.0, level: float = 10.0) -> None:
@@ -4122,6 +4150,7 @@ class UnipiBridge:
             if not state:
                 return
             state["is_dimming"] = True
+            self.active_ao_transitions.pop((dev, circuit), None)   # dimming by hand takes over from a running fade
             try:
                 cur = float(self.device_states.get(key, 0))
             except (ValueError, TypeError):

@@ -580,6 +580,12 @@
                     this.appendDummyInput()
                         .appendField("Lowest dim level (V)")
                         .appendField(new Blockly.FieldNumber(1, 0, 5), "MINV");
+                    this.appendDummyInput()
+                        .appendField("Fade on when tapped (ms)")
+                        .appendField(new Blockly.FieldNumber(0, 0, 60000), "FADE_ON");
+                    this.appendDummyInput()
+                        .appendField("Fade off when tapped (ms)")
+                        .appendField(new Blockly.FieldNumber(0, 0, 60000), "FADE_OFF");
                     this.setOutput(true, "Action");
                     this.setColour(20);
                     this.setTooltip("Like a Z-Wave dimmer. Tap the button: on (to the switch-on level, or where it was) / off. " +
@@ -723,6 +729,8 @@
                     let dimmerHoldMs = 800;
                     let dimmerSpeed = 2.5;
                     let dimmerMin = 1.0;
+                    let dimmerFadeOn = 0;
+                    let dimmerFadeOff = 0;
 
                     if (actionBlock.type === 'unipi_action') {
                         actionDev = actionBlock.getFieldValue('DEV');
@@ -740,6 +748,8 @@
                         dimmerSpeed = parseFloat(actionBlock.getFieldValue('SPEED')) || 2.5;
                         dimmerMin = parseFloat(actionBlock.getFieldValue('MINV'));
                         if (isNaN(dimmerMin)) dimmerMin = 1.0;
+                        dimmerFadeOn = parseInt(actionBlock.getFieldValue('FADE_ON'), 10) || 0;
+                        dimmerFadeOff = parseInt(actionBlock.getFieldValue('FADE_OFF'), 10) || 0;
                     } else if (actionBlock.type === 'unipi_action_pulse') {
                         actionType = "pulse";
                         actionDev = actionBlock.getFieldValue('DEV');
@@ -768,6 +778,8 @@
                         dimmer_hold_ms: dimmerHoldMs,
                         dimmer_speed: dimmerSpeed,
                         dimmer_min: dimmerMin,
+                        dimmer_fade_on_ms: dimmerFadeOn,
+                        dimmer_fade_off_ms: dimmerFadeOff,
                         trigger_dev: triggerDev,
                         trigger_circuit: triggerCircuit,
                         trigger_operator: (actionType === 'dimmer' && dimmerHold) ? 'any' : triggerOp,
@@ -881,6 +893,8 @@
                             actionBlock.setFieldValue(String(rule.dimmer_hold_ms || 800), 'HOLD_MS');
                             actionBlock.setFieldValue(String(rule.dimmer_speed || 2.5), 'SPEED');
                             actionBlock.setFieldValue(String(rule.dimmer_min === undefined ? 1 : rule.dimmer_min), 'MINV');
+                            actionBlock.setFieldValue(String(rule.dimmer_fade_on_ms || 0), 'FADE_ON');
+                            actionBlock.setFieldValue(String(rule.dimmer_fade_off_ms || 0), 'FADE_OFF');
                         } else if (rule.action_type === 'pulse') {
                             actionBlock = workspace.newBlock('unipi_action_pulse');
                             actionBlock.setFieldValue(canonDev(rule.action_dev), 'DEV');

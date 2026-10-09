@@ -153,3 +153,111 @@ def test_the_trace_explains_a_push_to_dim(b):
     ev = b.local_logic.trace_since(0)["events"]
     assert any(e["step"] == "trigger" and "push-to-dim" in e["detail"] for e in ev)
     assert any(e["step"] == "executed" and "dimming stopped at" in e["detail"] for e in ev)
+
+
+# ---- fade when tapped (on / off, separately) ------------------------------------------------------------------------------
+from conftest import settle   # noqa: E402
+
+
+def writes_after(b, seconds=0.0):
+    settle(b, 0.4)
+    return [json.loads(m)["value"] for m in drain(b.mqtt_to_websocket_queue)]
+
+
+def test_a_tap_that_switches_on_can_fade_up(b, fast_sleep):
+    setup(b, ao_level=0.0, dimmer_fade_on_ms=1000)
+    button(b, 1); button(b, 0)
+    # BEFORE the fade has run a single step: HA already shows the wanted end state, nothing was written yet
+    acks = [json.loads(p) for t, p in drain(b.websocket_to_mqtt_queue) if t.endswith("/ao/xS51_01/state")]
+    assert acks and acks[0]["state"] == "ON" and acks[0]["brightness"] == 600
+    assert drain(b.mqtt_to_websocket_queue) == []
+    vals = writes_after(b)
+    assert len(vals) >= 5 and vals == sorted(vals) and 0 < vals[0] < 6.0 and vals[-1] == 6.0     # then gradual, ending on the level
+
+
+def test_a_tap_that_switches_off_can_fade_down(b, fast_sleep):
+    setup(b, ao_level=6.0, dimmer_fade_off_ms=1000)
+    button(b, 1); button(b, 0)
+    vals = writes_after(b)
+    assert len(vals) >= 5 and vals == sorted(vals, reverse=True) and vals[-1] == 0.0 and vals[0] > 0.0
+
+
+def test_fade_on_and_fade_off_are_independent(b, fast_sleep):
+    setup(b, ao_level=0.0, dimmer_fade_on_ms=0, dimmer_fade_off_ms=1000)
+    button(b, 1); button(b, 0)
+    assert writes_after(b) == [6.0]                                    # on: instant
+    b.device_states["ao_xS51_01"] = 6.0
+    b.device_states["di_1_01"] = 0
+    button(b, 1); button(b, 0)
+    off = writes_after(b)
+    assert len(off) >= 5 and off[-1] == 0.0                            # off: fades
+
+
+def test_no_fade_configured_stays_instant(b, fast_sleep):
+    setup(b, ao_level=0.0)
+    button(b, 1); button(b, 0)
+    assert writes_after(b) == [6.0]
+
+
+def test_a_second_tap_during_a_fade_reverses_it(b, fast_sleep):
+    setup(b, ao_level=0.0, dimmer_fade_on_ms=2000, dimmer_fade_off_ms=2000)
+    button(b, 1); button(b, 0)                                         # start fading up...
+    b.device_states["ao_xS51_01"] = 3.0                                # ...evok reports it is half way
+    drain(b.mqtt_to_websocket_queue)
+    button(b, 1); button(b, 0)                                         # tap again: that means "off"
+    vals = writes_after(b)
+    assert vals and vals[-1] == 0.0 and max(vals) < 6.0                # fades down from where it was, never up to 6 V
+
+
+def test_holding_takes_over_from_a_running_fade(b, fast_sleep):
+    setup(b, ao_level=0.0, dimmer_fade_on_ms=3000)
+    button(b, 1); button(b, 0)                                         # fade up started
+    assert ("ao", "xS51_01") in b.active_ao_transitions
+    b.device_states["ao_xS51_01"] = 2.0
+    button(b, 1)                                                       # press and hold...
+    run(b, b.ft.advance_to(b.ft.t + 1.5))
+    assert ("ao", "xS51_01") not in b.active_ao_transitions            # ...the fade is cancelled, the hand dims
+    button(b, 0)
+
+
+def test_fade_times_are_validated(b):
+    for kw in (dict(dimmer_fade_on_ms=-1), dict(dimmer_fade_off_ms=60001)):
+        setup(b)
+        assert "0-60000" in (b.validate_rule(b.mod.LocalLogicRule(**{**dict(
+            name="d", trigger_dev="di", trigger_circuit=BTN, action_type="dimmer", action_dev="ao", action_circuit=AO[1]), **kw})) or "")
+
+
+def test_the_activity_log_says_the_lamp_is_fading(b, fast_sleep):
+    setup(b, ao_level=0.0, dimmer_fade_on_ms=1500)
+    button(b, 1); button(b, 0)
+    ex = [e for e in b.local_logic.trace_since(0)["events"] if e["step"] == "executed"]
+    assert "fading over 1500 ms" in ex[-1]["detail"]
+    settle(b, 0.3)                                                     # let the fade finish before the test ends
+
+
+def test_an_instant_tap_cancels_a_running_fade(b, fast_sleep):
+    setup(b, ao_level=0.0, dimmer_fade_on_ms=2000, dimmer_fade_off_ms=0)       # up: fades, down: instant
+    button(b, 1); button(b, 0)                                                 # fade up starts (not a single step run yet)
+    b.device_states["ao_xS51_01"] = 3.0                                        # evok reports it is half way
+    b.device_states["di_1_01"] = 0
+    button(b, 1); button(b, 0)                                                 # tap = off, instantly
+    assert writes_after(b) == [0.0]                                            # the old fade must NOT carry on up to 6 V
+
+
+def test_holding_takes_over_from_a_fade_that_is_still_running(b, monkeypatch):
+    import asyncio
+    monkeypatch.setattr(asyncio, "sleep", b.ft.sleep)                          # fade and dimmer share ONE fake clock
+    setup(b, ao_level=0.0, dimmer_fade_on_ms=3000, dimmer_hold_ms=300)
+    b.dimmer_persist[b.local_logic.rules[0].id] = {"last_direction": -1, "previous_level": 6.0}   # this hold dims DOWN
+    button(b, 1); button(b, 0)                                                 # t=0: fade up to 6 V starts (+0.2 V per 0.1 s)
+    run(b, b.ft.advance_to(0.7))
+    b.device_states["ao_xS51_01"] = 1.4                                        # evok: the lamp is at 1.4 V
+    b.device_states["di_1_01"] = 0
+    drain(b.mqtt_to_websocket_queue)
+    button(b, 1)                                                               # t=0.7: press and hold (hold time 0.3 s)
+    run(b, b.ft.advance_to(1.05))                                              # the fade legitimately runs until the hold time is over
+    drain(b.mqtt_to_websocket_queue)                                           # ...from t=1.0 the hand is in charge
+    run(b, b.ft.advance_to(2.5))
+    button(b, 0)
+    vals = [json.loads(m)["value"] for m in drain(b.mqtt_to_websocket_queue)]
+    assert vals and max(vals) <= 1.4 and vals[-1] == 1.0                       # only the hand dims; the fade did not keep climbing
