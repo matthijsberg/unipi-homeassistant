@@ -8,6 +8,7 @@ Version 202504-001
 """
 
 import argparse  # Added for argument parsing
+from collections import deque
 import queue  # Added back
 import threading
 import time
@@ -85,7 +86,7 @@ else:
     print("Required libraries check passed.")
 
 # --- Script Version ---
-SCRIPT_VERSION = "2.2.0-rc7"
+SCRIPT_VERSION = "2.2.0-rc8"
 
 # --- Constants ---
 # Last discovered device name, so the MQTT last-will can use the device's own
@@ -394,8 +395,20 @@ class LocalLogicEngine:
         self.logger = logger
         self.validator = validator            # rule -> error text | None (set by the bridge)
         self.disabled: dict[str, str] = {}    # rule id -> why it is not evaluated (rules stay in the file)
+        # What the engine saw and decided (newest last); shown live in the editor's activity panel
+        self.trace: deque = deque(maxlen=300)
+        self._seq = 0
+        self._last_nonmatch: dict[str, float] = {}
         self.rules: list[LocalLogicRule] = []
         self.load_rules()
+
+    def record(self, rule_id: str | None, rule_name: str | None, step: str, ok: bool, detail: str) -> None:
+        self._seq += 1
+        self.trace.append({"seq": self._seq, "ts": time.time(), "rule_id": rule_id, "rule": rule_name,
+                           "step": step, "ok": ok, "detail": detail})
+
+    def trace_since(self, since: int = 0) -> dict[str, Any]:
+        return {"last": self._seq, "events": [e for e in self.trace if e["seq"] > since]}
 
     def revalidate(self) -> None:
         """Disable (not delete) rules that are invalid for the current circuit configuration."""
@@ -406,7 +419,9 @@ class LocalLogicEngine:
             err = self.validator(r)
             if err:
                 self.disabled[r.id] = err
-                self.logger.error(f"Local rule '{r.name}' ({r.id}) is DISABLED: {err}")
+                # A WARNING, not an ERROR: a typo in a user's rule is not a bridge fault (it must not raise the
+                # "startup error" alarm or fail a deploy). It is shown on the rule's block in the editor.
+                self.logger.warning(f"Local rule '{r.name}' ({r.id}) is DISABLED: {err}")
 
     def load_rules(self) -> None:
         try:
@@ -471,8 +486,10 @@ class LocalLogicEngine:
         return False
 
     def _get_device_state(self, dev: str, circuit: str, device_states: dict[str, Any]) -> Any:
-        # Try direct match
-        val = device_states.get(f"{dev}_{circuit}")
+        # Try direct match (canonical evok-3 name first: input->di, analogoutput->ao, ...)
+        val = device_states.get(f"{normalize_dev(dev)}_{circuit}")
+        if val is None:
+            val = device_states.get(f"{dev}_{circuit}")
         if val is not None:
             return val
         # Try aliases
@@ -502,46 +519,64 @@ class LocalLogicEngine:
         if msg_dev is None or msg_circuit is None or msg_value is None:
             return actions
 
+        OPS = {"eq": "=", "ne": "!=", "gt": ">", "lt": "<", "ge": ">=", "le": "<=", "any": "any change"}
+        now = time.time()
         for rule in self.rules:
-            if rule.id in self.disabled:
+            # Device names are compared in their canonical evok-3 form: rules saved with the old evok-2
+            # names ("input", "analogoutput", "relay", "output") keep working.
+            if not (normalize_dev(rule.trigger_dev) == normalize_dev(msg_dev) and rule.trigger_circuit == msg_circuit):
                 continue
-            if rule.trigger_dev == msg_dev and rule.trigger_circuit == msg_circuit:
+            if rule.id in self.disabled:
+                self.record(rule.id, rule.name, "disabled", False, f"rule is disabled: {self.disabled[rule.id]}")
+                continue
 
-                match = False
-                if rule.trigger_operator == "any":
-                    match = True
-                else:
-                    match = self._compare_values(msg_value, rule.trigger_value, rule.trigger_operator)
+            if rule.trigger_operator == "any":
+                match = True
+            else:
+                match = self._compare_values(msg_value, rule.trigger_value, rule.trigger_operator)
+            need = OPS.get(rule.trigger_operator, rule.trigger_operator)
+            if rule.trigger_operator != "any":
+                need += f" {rule.trigger_value}"
+            seen = f"{msg_dev}/{msg_circuit} = {msg_value}"
+            if match:
+                self.record(rule.id, rule.name, "trigger", True, f"{seen} - trigger matched ({need})")
+            elif now - self._last_nonmatch.get(rule.id, 0) >= 2.0:   # don't flood on fast analog values
+                self._last_nonmatch[rule.id] = now
+                self.record(rule.id, rule.name, "trigger", False, f"{seen} - no match, needs {need}")
 
-                # Check secondary conditions if trigger matched
-                if match and rule.conditions:
-                    for cond in rule.conditions:
-                        current_val = self._get_device_state(cond.dev, cond.circuit, device_states or {})
-                        if not self._compare_values(current_val, cond.value, cond.operator):
-                            match = False
-                            break
+            # Check secondary conditions if trigger matched
+            if match and rule.conditions:
+                for cond in rule.conditions:
+                    current_val = self._get_device_state(cond.dev, cond.circuit, device_states or {})
+                    if not self._compare_values(current_val, cond.value, cond.operator):
+                        match = False
+                        self.record(rule.id, rule.name, "conditions", False,
+                                    f"condition {cond.dev}/{cond.circuit} is {current_val!r}, needs "
+                                    f"{OPS.get(cond.operator, cond.operator)} {cond.value} - stopped")
+                        break
 
-                if match:
-                    self.logger.info(
-                        f"Rule '{rule.name}' triggered by {msg_dev} {msg_circuit} ({msg_value}) {rule.trigger_operator} {rule.trigger_value}"
-                    )
-                    action = {
-                        "type": getattr(rule, "action_type", "set"),
-                        "dev": rule.action_dev,
-                        "circuit": rule.action_circuit,
-                        "value": rule.action_value,
-                        "trigger_value": msg_value,
-                        "rule_id": rule.id,
-                        "pulse": rule.action_pulse,
-                        "preset": rule.action_preset,
-                        "when": rule.when,
-                        "hold": rule.dimmer_hold,
-                    }
-                    if rule.action_transition is not None:
-                        action["transition"] = rule.action_transition
-                    if getattr(rule, "action_delay", None) is not None:
-                        action["delay"] = rule.action_delay
-                    actions.append(action)
+            if match:
+                self.logger.info(
+                    f"Rule '{rule.name}' triggered by {msg_dev} {msg_circuit} ({msg_value}) {rule.trigger_operator} {rule.trigger_value}"
+                )
+                action = {
+                    "type": getattr(rule, "action_type", "set"),
+                    "dev": normalize_dev(rule.action_dev),
+                    "circuit": rule.action_circuit,
+                    "value": rule.action_value,
+                    "trigger_value": msg_value,
+                    "rule_id": rule.id,
+                    "rule_name": rule.name,
+                    "pulse": rule.action_pulse,
+                    "preset": rule.action_preset,
+                    "when": rule.when,
+                    "hold": rule.dimmer_hold,
+                }
+                if rule.action_transition is not None:
+                    action["transition"] = rule.action_transition
+                if getattr(rule, "action_delay", None) is not None:
+                    action["delay"] = rule.action_delay
+                actions.append(action)
 
         return actions
 
@@ -3640,6 +3675,9 @@ class UnipiBridge:
     # -------------------------------------------------------------------------
 
     # ---- T17 helpers -----------------------------------------------------------------------------
+    def _rec(self, action: dict[str, Any], step: str, ok: bool, detail: str) -> None:
+        self.local_logic.record(action.get("rule_id"), action.get("rule_name"), step, ok, detail)
+
     def _ha_reachable(self) -> bool:
         return self.ha_online is True and self.mqtt_client.is_connected()
 
@@ -3660,7 +3698,9 @@ class UnipiBridge:
         try:
             spec = self._rule_spec(dev, circuit, action.get("pulse"), action.get("preset"))
             await self.sequencer.start(dev, circuit, spec, origin="rule")
+            self._rec(action, "executed", True, f"pulse sequence started on {dev}/{circuit}: {spec}")
         except SequenceRejected as e:
+            self._rec(action, "rejected", False, f"pulse refused: {e}")
             self.logger.warning(f"Rule pulse on {dev}/{circuit} rejected: {e}")
             self._publish_attributes(dev, circuit, {"last_error": f"rule: {e}"})
 
@@ -3673,7 +3713,24 @@ class UnipiBridge:
             return f"'when' must be 'always' or 'ha_offline', got '{rule.when}'"
         if not rule.trigger_dev or not rule.trigger_circuit:
             return "the trigger needs a device and a circuit"
+        known = {"di", "ai", "ao", "ro", "do", "led", "temp", "humidity", "vdd", "vad", "vis", "1wdevice"}
+        if normalize_dev(rule.trigger_dev) not in known:
+            return f"unknown trigger device '{rule.trigger_dev}' (known: {sorted(known)})"
+        for c in rule.conditions:
+            if normalize_dev(c.dev) not in known:
+                return f"unknown device '{c.dev}' in a condition (known: {sorted(known)})"
         dev = normalize_dev(rule.action_dev or "")
+        if t == "set":
+            if dev not in ("ro", "do", "led", "ao"):
+                return f"'set' needs an output device (relay/digital output/LED/analog output), got '{rule.action_dev}'"
+            if dev == "ao":
+                try:
+                    if not 0 <= float(rule.action_value) <= 10:
+                        raise ValueError
+                except (TypeError, ValueError):
+                    return f"an analog output takes a voltage between 0 and 10, got {rule.action_value!r}"
+            elif str(rule.action_value).strip().lower() not in ("1", "0", "on", "off", "true", "false"):
+                return f"a {dev} output takes 1/0 or ON/OFF, got {rule.action_value!r}"
         if t in ("toggle", "pulse") and dev not in ("do", "ro", "led"):
             return f"'{t}' needs a digital output (do/ro/led), got '{rule.action_dev}'"
         if t == "pulse":
@@ -3719,6 +3776,7 @@ class UnipiBridge:
         """Executes a local action generated by the logic engine."""
         if self.shadow:
             self.logger.info(f"SHADOW: rule action would run: {action}")
+            self._rec(action, "shadow", False, "shadow mode: action logged, not executed")
             return
         try:
             dev = action.get("dev")
@@ -3732,6 +3790,7 @@ class UnipiBridge:
             # "Only when Home Assistant is unreachable": HA is in charge while it is up
             if action.get("when", "always") == "ha_offline" and self._ha_reachable():
                 self.logger.debug(f"Rule action for {dev}/{circuit} skipped: Home Assistant is reachable")
+                self._rec(action, "gated", False, "skipped: Home Assistant is reachable and this rule only runs when it is not")
                 return
 
             # Handle action delay
@@ -3760,6 +3819,7 @@ class UnipiBridge:
                 
                 new_task = self.loop.create_task(delayed_execution(), name=f"DelayedAction-{dev}-{circuit}")
                 self.active_delayed_actions[task_key] = new_task
+                self._rec(action, "delayed", True, f"waiting {delay} s before {action.get('type', 'set')} {dev}/{circuit}")
                 return
 
             action_type = action.get("type", "set")
@@ -3773,6 +3833,7 @@ class UnipiBridge:
                 value = self._toggled_value(dev, circuit)
 
             if value is None:
+                self._rec(action, "rejected", False, "the rule has no value to set")
                 return
 
             self.logger.info(
@@ -3841,18 +3902,24 @@ class UnipiBridge:
                                 ),
                                 name=f"AOTransitionLocal-{dev}-{circuit}",
                             )
+                            self._rec(action, "executed", True,
+                                      f"fading {dev}/{circuit} to {target_value:g} V over {transition_time_ms:g} ms")
                             return  # Skip sending immediate command
                     except ValueError:
                         self.logger.error(f"Invalid value for AO action: {value}")
+                        self._rec(action, "rejected", False, f"{value!r} is not a valid voltage")
                         return
 
             if cmd_data:
                 if self.sequencer.is_running(dev, circuit):  # a rule overrides a running pulse/timed sequence
                     self.loop.create_task(self.sequencer.cancel(dev, circuit, "rule action"))
                 self.commands.send_ws(cmd_data["dev"], cmd_data["circuit"], cmd_data["value"])
+                self._rec(action, "executed", True,
+                          f"{'toggle' if action_type == 'toggle' else 'set'} {dev}/{circuit} = {cmd_data['value']} sent to the Unipi")
 
         except Exception as e:
             self.logger.error(f"Error executing local action: {e}")
+            self._rec(action, "error", False, f"error while executing: {e}")
 
     def handle_dimmer_action(self, action: dict[str, Any]) -> None:
         """Dimmer rule. hold=True: short press toggles on release, long press dims while held.
@@ -3892,7 +3959,7 @@ class UnipiBridge:
 
         if not action.get("hold", True):
             if trigger_val_int == 1:       # press edge only; the release is ignored
-                self._dimmer_toggle(state, dev, circuit, level)
+                self._dimmer_toggle(state, dev, circuit, level, action)
             return
 
         if trigger_val_int == 1:
@@ -3924,9 +3991,9 @@ class UnipiBridge:
                 state["is_dimming"] = False
                 self._save_dimmer_state()
             else:
-                self._dimmer_toggle(state, dev, circuit, level)
+                self._dimmer_toggle(state, dev, circuit, level, action)
 
-    def _dimmer_toggle(self, state: dict[str, Any], dev: str, circuit: str, level: float) -> None:
+    def _dimmer_toggle(self, state: dict[str, Any], dev: str, circuit: str, level: float, action: dict[str, Any] | None = None) -> None:
         try:
             current_val = float(self.device_states.get(f"{dev}_{circuit}", 0))
         except (ValueError, TypeError):
@@ -3941,6 +4008,8 @@ class UnipiBridge:
         self.commands.send_ws(dev, circuit, target_val)
         self.mqtt_ack(str(int(target_val * 100)), dev, circuit, origin="rule")
         self._save_dimmer_state()
+        if action:
+            self._rec(action, "executed", True, f"dimmer {dev}/{circuit} -> {target_val:g} V")
 
     async def _dimmer_hold_task(self, rule_id: str, dev: str, circuit: str) -> None:
         """Async task that handles the dimming loop while button is held."""
@@ -4041,6 +4110,7 @@ class UnipiBridge:
             # self.web_handler_update_rule) # Not implemented yet
             app.router.add_delete("/api/rules/{rule_id}", self.web_handler_delete_rule)
             app.router.add_get("/api/status", self.web_handler_get_status)
+            app.router.add_get("/api/rule_trace", self.web_handler_rule_trace)
             app.router.add_get("/api/inputs", self.web_handler_get_inputs)
             app.router.add_post("/api/inputs/{circuit}", self.web_handler_update_input)
 
@@ -4118,8 +4188,21 @@ class UnipiBridge:
 
     async def web_handler_get_rules(self, request: web.Request) -> web.Response:
         """Returns the list of rules."""
-        rules_data = [rule.model_dump() for rule in self.local_logic.rules]
+        rules_data = []
+        for rule in self.local_logic.rules:
+            d = rule.model_dump()
+            if rule.id in self.local_logic.disabled:
+                d["disabled_reason"] = self.local_logic.disabled[rule.id]   # shown as a warning on the block
+            rules_data.append(d)
         return web.json_response(rules_data)
+
+    async def web_handler_rule_trace(self, request: web.Request) -> web.Response:
+        """Recent rule activity (what the engine saw and decided). ?since=<seq> returns only newer events."""
+        try:
+            since = int(request.query.get("since", "0"))
+        except ValueError:
+            since = 0
+        return web.json_response(self.local_logic.trace_since(since))
 
     async def web_handler_get_status(self, request: web.Request) -> web.Response:
         """Returns the current device states."""

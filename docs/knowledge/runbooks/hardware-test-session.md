@@ -10,6 +10,12 @@ generated: { by: claude-code/claude-sonnet-5-5, at: 2026-10-07T18:00:00Z }
 State when written: S103 runs `v2.2.0-rc7` (T10–T12, T15, T17, T18 live; T13 not built; T14/T16 dropped to Home Assistant).
 House impact of every step below is stated; none switches anything but the front-panel LED unless you say so.
 
+# 0. Reading the new "Rule activity" panel (rc8)
+Right-hand side of the editor, below Live Diagnostics. Each line = one step the bridge took for a rule: ▶️ trigger matched, ○ trigger seen but
+the value did not match (says what it needs), ⛔ a condition stopped it (says which), ⏭ skipped because Home Assistant is reachable, ⏳ delayed,
+✅ executed (says what was sent), ⚠️ disabled/refused/error (says why). The rule's block flashes blue/green/orange. A rule with a problem shows a
+warning icon on its block. **Use this panel in every step below: if nothing happens, it tells you why.**
+
 # 1. Rule editor click-through (T17) — 5 min, no hardware effect
 Open `http://<S103_IP>:8088`, log in. Pass when:
 1. Existing rules (none today) load without error.
