@@ -126,7 +126,7 @@ def test_view_bar_has_tabs_search_and_the_four_helpers():
 
 
 def test_tabs_only_hide_rules_so_saving_still_saves_everything():
-    save = re.search(r"async function saveRules\(\) \{(.*?)\n            \}\n", SCRIPT, re.S).group(1)
+    save = re.search(r"function buildRules\(\) \{(.*?)\n            \}\n", SCRIPT, re.S).group(1)   # what saveRules sends
     assert "getTopBlocks(false)" in save and "display" not in save and "activeGroup" not in save      # save ignores what is shown
     assert "group: group" in save and "GROUP" in save
 

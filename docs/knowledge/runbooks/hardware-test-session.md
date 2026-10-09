@@ -32,6 +32,13 @@ Hard-refresh the editor first (Ctrl+Shift+R). Pass when:
 5. Search for part of a rule name: only matching rules remain visible.
 If anything is off, note which step and what you saw (screenshot helps); rollback = `tools/rollback.sh v2.2.0-rc11`.
 
+# 1c. Test button: run a rule's action on demand (T17g, rc13) — 3 min, switches the real output
+Use this to try the bell/lamp rules without pressing the physical button. Click a **saved** rule, press **▶ Test** and confirm. Pass when:
+1. The output does what the rule's action says (lamp on/off or fade, bell rings N times with the right timing, push-to-dim toggles).
+2. For a push-to-dim rule **▶ Test hold** dims for a few seconds and then stops by itself.
+3. The Rule activity panel shows `TEST ...` lines; HA Logbook shows the event with "TEST:" in its detail.
+4. After editing a rule without saving, ▶ Test refuses ("unsaved changes"); a brand-new rule says "not saved yet".
+
 # 1a. "Who switched it?" in Home Assistant (T17d, rc10) — no hardware effect
 After a rule has fired: in HA open **Settings → Devices → the Unipi device** → entity **"Rule activity"** (last event = the rule name; attributes: what was
 sent and the target), and the **Logbook** shows "Rule activity detected <rule name>" right beside the lamp's state change. If the logbook only says

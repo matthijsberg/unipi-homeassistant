@@ -426,6 +426,8 @@
             <input id="ruleSearch" type="search" placeholder="Search rule / circuit..." oninput="applyView()">
             <span style="flex: 1;"></span>
             <span class="tools">
+                <button onclick="testRule('tap')" title="Select a saved rule (click its name), then run its ACTION once on the real Unipi. Trigger and conditions are skipped.">&#9654; Test</button>
+                <button onclick="testRule('hold')" title="For push-to-dim rules: press and hold for a few seconds, then let go">&#9654; Test hold</button>
                 <button onclick="arrangeRules()" title="Stack the visible rules neatly, nothing overlaps">Arrange</button>
                 <button onclick="zoomFit()" title="Zoom so that everything fits on screen">Fit</button>
                 <button onclick="collapseRules(true)" title="Show each rule as one line">Collapse all</button>
@@ -692,6 +694,7 @@
 
             // View state. Declared up here on purpose: loadRules() runs early and reads these before the
             // view code further down is reached (a `let` below would still be uninitialised: empty editor).
+            let savedSig = null;     // the rules as last loaded/saved, to see unsaved changes before a test
             const NO_GROUP = '\u0000none';
             let activeGroup = '*';
             let nextOrder = 0;
@@ -707,7 +710,8 @@
                 setTimeout(() => { el.textContent = ''; }, 3000);
             }
 
-            async function saveRules() {
+            // The rules exactly as they would be saved (also used to see whether there are unsaved changes).
+            function buildRules() {
                 const rules = [];
                 const topBlocks = workspace.getTopBlocks(false); // Get all top-level blocks
 
@@ -828,6 +832,11 @@
                     }));
                 }
 
+                return rules;
+            }
+
+            async function saveRules() {
+                const rules = buildRules();
                 console.log("Saving rules:", rules);
 
                 try {
@@ -964,6 +973,7 @@
                     }
                     rebuildTabs();
                     applyView();
+                    markSaved();
                     showStatus("Rules loaded.");
                 } catch (e) {
                     console.error(e);
@@ -1242,6 +1252,53 @@
 
             function arrangeRules() { applyView(); }
             function zoomFit() { applyView(); workspace.zoomToFit(); }
+            // --- Test: run the action of the selected (saved) rule on the real Unipi ---
+            function markSaved() {
+                try { savedSig = JSON.stringify(buildRules()); } catch (e) { savedSig = null; }
+            }
+
+            function selectedRule() {
+                let b = null;
+                try { b = (Blockly.getSelected || Blockly.common.getSelected)(); } catch (e) { b = null; }
+                while (b && b.type !== 'unipi_rule') b = b.getParent ? b.getParent() : null;
+                return b;
+            }
+
+            async function testRule(mode) {
+                const block = selectedRule();
+                if (!block) { showStatus('Click a rule first (on its name), then press Test.', true); return; }
+                let id = null;
+                try { id = JSON.parse(block.data || '{}').id || null; } catch (e) { id = null; }
+                if (!id) { showStatus('This rule is not saved yet - press Save first.', true); return; }
+                let sig = null;
+                try { sig = JSON.stringify(buildRules()); } catch (e) { sig = null; }
+                if (sig !== savedSig) {
+                    showStatus('There are unsaved changes - press Save first (a test runs the saved rule).', true);
+                    return;
+                }
+                const name = block.getFieldValue('NAME');
+                const what = mode === 'hold'
+                    ? 'press AND HOLD (it will dim for a few seconds, then let go)'
+                    : 'run the action once';
+                if (!confirm("Test rule '" + name + "': " + what + " on the REAL Unipi now?\n\nThe trigger and conditions are skipped; the action really switches the output.")) return;
+                try {
+                    const res = await fetch(API_URL + '/' + encodeURIComponent(id) + '/test', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ mode: mode })
+                    });
+                    if (res.status === 401) { showLoginModal("Please log in to test rules."); return; }
+                    let data = {};
+                    try { data = await res.json(); } catch (e) { /* not JSON */ }
+                    if (!res.ok) { showStatus('Test not run: ' + (data.error || res.status), true); return; }
+                    const last = (data.events || []).filter(e => e.step !== 'test').pop();
+                    showStatus('Test started' + (last ? ': ' + last.detail : '') + ' (details in Rule activity)', !!(last && !last.ok));
+                } catch (e) {
+                    console.error(e);
+                    showStatus('Test failed: could not reach the Unipi.', true);
+                }
+            }
+
             function collapseRules(flag) {
                 ruleBlocks().forEach(b => b.setCollapsed(flag));
                 setTimeout(applyView, 80);                         // heights change after the re-render
