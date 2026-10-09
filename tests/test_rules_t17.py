@@ -67,7 +67,10 @@ def queued(b):
     (dict(action_type="pulse", action_pulse={"count": 2}, action_dev="ao"), False),
     (dict(action_type="dimmer", action_dev="ro", trigger_operator="any"), False),
     (dict(action_type="dimmer", action_dev="ao", trigger_operator="any", action_value=11), False),
-    (dict(action_type="dimmer", action_dev="ao", action_circuit="xS51_01"), False),  # hold-to-dim needs press AND release
+    (dict(action_type="dimmer", action_dev="ao", action_circuit="xS51_01"), True),   # hold-to-dim always follows press AND release
+    (dict(action_type="dimmer", action_dev="ao", action_circuit="xS51_01", dimmer_hold_ms=100), False),
+    (dict(action_type="dimmer", action_dev="ao", action_circuit="xS51_01", dimmer_speed=0.01), False),
+    (dict(action_type="dimmer", action_dev="ao", action_circuit="xS51_01", dimmer_min=7), False),
     (dict(when="sometimes"), False),
 ])
 def test_rule_validation(b, mod, kw, ok):

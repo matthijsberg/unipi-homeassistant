@@ -27,12 +27,12 @@ def test_save_keeps_unknown_fields_and_the_rule_id():
     assert "JSON.parse(block.data)" in SCRIPT and "Object.assign({}, base" in SCRIPT   # save starts from it
 
 
-@pytest.mark.parametrize("field", ["WHEN", "LEVEL", "HOLD", "PRESET", "COUNT", "ON_MS", "OFF_MS"])
+@pytest.mark.parametrize("field", ["LEVEL", "HOLD", "HOLD_MS", "SPEED", "MINV", "PRESET", "COUNT", "ON_MS", "OFF_MS"])
 def test_new_fields_are_used_for_both_saving_and_loading(field):
     assert len(re.findall(rf"['\"]{field}['\"]", SCRIPT)) >= 3          # defined once, read on save, set on load
 
 
-@pytest.mark.parametrize("key", ["action_pulse", "action_preset", "dimmer_hold", "when"])
+@pytest.mark.parametrize("key", ["action_pulse", "action_preset", "dimmer_hold", "dimmer_hold_ms", "dimmer_speed", "dimmer_min"])
 def test_saved_rule_contains_the_new_keys(key):
     assert key in SCRIPT
 
@@ -72,3 +72,14 @@ def test_saving_reloads_rules_and_shows_the_servers_refusal_reason():
 def test_disabled_rules_show_their_reason_on_the_block_and_it_is_never_saved_back():
     assert "setWarningText" in SCRIPT and "rule.disabled_reason" in SCRIPT
     assert "delete base.disabled_reason" in SCRIPT
+
+
+def test_the_ha_fallback_selector_is_gone_but_existing_rules_keep_their_setting():
+    assert '"WHEN"' not in SCRIPT and "'WHEN'" not in SCRIPT                  # no dropdown (and no code touching a missing field)
+    assert "ha_offline" not in SCRIPT                                        # nothing in the editor mentions it any more
+    assert "Object.assign({}, base" in SCRIPT                                # `when` of an existing rule travels in `base`
+
+
+def test_push_to_dim_block_is_discoverable_and_tells_the_truth_about_the_trigger():
+    assert "Push-to-dim light" in HTML and "follows press and release" in HTML
+    assert "(actionType === 'dimmer' && dimmerHold) ? 'any' : triggerOp" in SCRIPT
