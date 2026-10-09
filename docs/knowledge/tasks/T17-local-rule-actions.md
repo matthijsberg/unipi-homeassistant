@@ -101,4 +101,14 @@ Matthijs wanted to stop searching HA for who switches a lamp and chose **the Log
 Matthijs (push-to-dim works great): the tap that switches a lamp on/off lost the fade time the old "Set Device" block had. Added `dimmer_fade_on_ms` / `dimmer_fade_off_ms` (0 = instant, default; 0–60000), separate for switching ON and OFF, in the editor block ("Fade on / off when tapped (ms)"). HA shows the wanted end state immediately; the lamp follows via the existing AO fade engine. A second tap during a fade reverses it from where it is; an instant tap or a hold cancels a running fade. The activity log says "fading over N ms".
 Tests 317; 7 mutation checks: 4 caught, **3 survivors were all weak tests of mine** (checked after the fade had finished; the hold test measured the fade's legitimate steps before the hold time had passed) → strengthened (shared fake clock, immediate assertions) → all caught.
 
+# Follow-up 2026-10-09 (5): zoom, group tabs, search in the rule editor (`rc12`)
+Matthijs: with several rules the blocks overlapped / fell off the screen and the editor could not be zoomed.
+- **Zoom**: mouse wheel with Ctrl/Cmd, pinch, on-canvas +/- controls; scrollbars and drag-to-pan. Blockly is now **vendored and pinned** (`web/static/blockly-13.3.0.min.js`, `BLOCKLY-NOTICE.txt` with hash/licence) instead of loaded from a CDN, so the editor works offline and cannot change under us.
+- **Group tabs**: each rule has an optional `group` (max 40 chars, field "Group (tab)" on the rule block, saved as `group` in the rule JSON). A tab bar shows "All", one tab per group and "No group" with counts; other groups are only *hidden*, never removed from the workspace, so saving from a filtered view keeps every rule. A rule created while a tab is open joins that tab.
+- **Search** by rule name/content, **Arrange** (stack rules without overlap), **Fit** (zoom to everything), **Collapse/Expand all**.
+- Blockly 13 has no `BlockSvg.setVisible`; hiding uses the block's SVG root `display`.
+- **First time the editor script is really executed in tests**: a QuickJS harness with a fake browser and a strict fake Blockly (`tests/js_harness.js`, `tests/test_web_ui_logic.py`, needs `quickjs`, see `requirements-dev.txt`). It immediately caught a temporal-dead-zone bug (state declared after the first `loadRules()` call) that would have shown an empty editor; the structural tests had passed it.
+- Tests: 348 (+31). 19 mutation checks on `web/index.html`; 3 survivors were test gaps (the saved dimmer fade/hold values were masked by the loaded copy of the rule) → tests now edit the block fields and assert the saved values → caught.
+- **Not verified**: a real browser (the fake Blockly cannot judge layout, scale feel or touch pinch). Needs a click-through by Matthijs after a hard refresh (Ctrl+Shift+R).
+
 # Open questions

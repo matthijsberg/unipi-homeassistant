@@ -23,6 +23,15 @@ Open `http://<S103_IP>:8088`, log in. Pass when:
 3. Reload the page: every rule, field and the "Runs" setting is back; saving again changes nothing.
 4. Delete the test rules and save (leave the file as `[]`).
 
+# 1b. Zoom, group tabs and search in the editor (T17f, rc12) — 5 min, no hardware effect
+Hard-refresh the editor first (Ctrl+Shift+R). Pass when:
+1. Zoom works: Ctrl/Cmd + mouse wheel, pinch on a touch screen, and the +/- controls bottom right; the canvas can be dragged; **Fit** shows all rules.
+2. Add 4+ rules: they do not overlap after **Arrange**; **Collapse all / Expand all** work.
+3. Fill "Group (tab)" on some rules (e.g. `Serre`, `Bel`): tabs appear with counts; clicking a tab shows only that group, "All" shows everything, "No group" shows the rest.
+4. In a filtered tab press Save, reload: **all** rules are still there (hidden is not deleted).
+5. Search for part of a rule name: only matching rules remain visible.
+If anything is off, note which step and what you saw (screenshot helps); rollback = `tools/rollback.sh v2.2.0-rc11`.
+
 # 1a. "Who switched it?" in Home Assistant (T17d, rc10) — no hardware effect
 After a rule has fired: in HA open **Settings → Devices → the Unipi device** → entity **"Rule activity"** (last event = the rule name; attributes: what was
 sent and the target), and the **Logbook** shows "Rule activity detected <rule name>" right beside the lamp's state change. If the logbook only says

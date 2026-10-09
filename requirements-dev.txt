@@ -1,1 +1,2 @@
 esprima==4.0.1
+quickjs>=1.19
