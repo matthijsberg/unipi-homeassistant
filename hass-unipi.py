@@ -86,7 +86,7 @@ else:
     print("Required libraries check passed.")
 
 # --- Script Version ---
-SCRIPT_VERSION = "2.2.0-rc8"
+SCRIPT_VERSION = "2.2.0-rc9"
 
 # --- Constants ---
 # Last discovered device name, so the MQTT last-will can use the device's own
@@ -386,6 +386,9 @@ class LocalLogicRule(BaseModel):
     action_preset: str | None = None             # name of a preset on the target circuit (pulse or timed)
     when: str = "always"                         # always | ha_offline
     dimmer_hold: bool = True                     # False = toggle on the press edge, no hold-to-dim
+    dimmer_hold_ms: int = 500                    # how long to hold before dimming starts (short press = toggle)
+    dimmer_speed: float = 2.5                    # volts per second while dimming (2.5 = full range in 4 s)
+    dimmer_min: float = 1.0                      # dimming down stops here (lamp stays on); a short press switches off
 
 
 
@@ -530,13 +533,20 @@ class LocalLogicEngine:
                 self.record(rule.id, rule.name, "disabled", False, f"rule is disabled: {self.disabled[rule.id]}")
                 continue
 
-            if rule.trigger_operator == "any":
+            dim_hold = rule.action_type == "dimmer" and rule.dimmer_hold
+            try:
+                is_release = int(float(msg_value)) == 0
+            except (TypeError, ValueError):
+                is_release = False
+            if rule.trigger_operator == "any" or dim_hold:
                 match = True
             else:
                 match = self._compare_values(msg_value, rule.trigger_value, rule.trigger_operator)
             need = OPS.get(rule.trigger_operator, rule.trigger_operator)
             if rule.trigger_operator != "any":
                 need += f" {rule.trigger_value}"
+            if dim_hold:
+                need = "button press and release (push-to-dim)"
             seen = f"{msg_dev}/{msg_circuit} = {msg_value}"
             if match:
                 self.record(rule.id, rule.name, "trigger", True, f"{seen} - trigger matched ({need})")
@@ -544,8 +554,8 @@ class LocalLogicEngine:
                 self._last_nonmatch[rule.id] = now
                 self.record(rule.id, rule.name, "trigger", False, f"{seen} - no match, needs {need}")
 
-            # Check secondary conditions if trigger matched
-            if match and rule.conditions:
+            # Check secondary conditions if trigger matched (never on the release of a push-to-dim)
+            if match and rule.conditions and not (dim_hold and is_release):
                 for cond in rule.conditions:
                     current_val = self._get_device_state(cond.dev, cond.circuit, device_states or {})
                     if not self._compare_values(current_val, cond.value, cond.operator):
@@ -571,6 +581,9 @@ class LocalLogicEngine:
                     "preset": rule.action_preset,
                     "when": rule.when,
                     "hold": rule.dimmer_hold,
+                    "hold_ms": rule.dimmer_hold_ms,
+                    "speed": rule.dimmer_speed,
+                    "min_v": rule.dimmer_min,
                 }
                 if rule.action_transition is not None:
                     action["transition"] = rule.action_transition
@@ -618,6 +631,7 @@ class UnipiBridge:
         # Home Assistant reachability (birth/last-will on <discovery_prefix>/status); None = never seen
         self.ha_online: bool | None = None
         self._dimmer_state_file = os.path.join(os.path.dirname(rules_path), "local_rules_state.json")
+        self._dim_sleep = asyncio.sleep   # replaced in tests so dimming can run on a fake clock
         self.dimmer_persist: dict[str, dict[str, Any]] = self._load_dimmer_state()
         self.local_logic = LocalLogicEngine(rules_path, self.logger, validator=self.validate_rule)
 
@@ -3749,9 +3763,12 @@ class UnipiBridge:
                         raise ValueError
                 except (TypeError, ValueError):
                     return f"dimmer level (action_value) must be a voltage in (0, 10], got {rule.action_value!r}"
-            if rule.dimmer_hold and rule.trigger_operator != "any":
-                return ("a dimmer with hold-to-dim must see both button press and release: use trigger_operator "
-                        "'any', or set dimmer_hold to false")
+            if not 200 <= rule.dimmer_hold_ms <= 5000:
+                return f"dimmer hold time must be 200-5000 ms, got {rule.dimmer_hold_ms}"
+            if not 0.2 <= rule.dimmer_speed <= 10:
+                return f"dimmer speed must be 0.2-10 volts per second, got {rule.dimmer_speed}"
+            if not 0 <= rule.dimmer_min <= 5:
+                return f"dimmer minimum level must be 0-5 V, got {rule.dimmer_min}"
         return None
 
     def _load_dimmer_state(self) -> dict[str, dict[str, Any]]:
@@ -3964,17 +3981,23 @@ class UnipiBridge:
 
         if trigger_val_int == 1:
             # Button Pressed
+            state["pressed"] = True
             state["is_dimming"] = False
             # Cancel any existing task just in case
             if state["dimming_task"]:
                 state["dimming_task"].cancel()
 
             state["dimming_task"] = self.loop.create_task(
-                self._dimmer_hold_task(rule_id, dev, circuit),
+                self._dimmer_hold_task(rule_id, dev, circuit, int(action.get("hold_ms", 500)),
+                                       float(action.get("speed", 2.5)), float(action.get("min_v", 1.0)), level),
                 name=f"DimmerHold-{rule_id}"
             )
         elif trigger_val_int == 0:
-            # Button Released
+            # Button Released. A release whose press was not accepted (e.g. a condition said no) must do nothing:
+            # it is let through the engine so that dimming always stops, not so that it can toggle the lamp.
+            if not state.get("pressed"):
+                return
+            state["pressed"] = False
             task = state.get("dimming_task")
             if task:
                 task.cancel()
@@ -3986,10 +4009,12 @@ class UnipiBridge:
                     current_val = float(self.device_states.get(f"{dev}_{circuit}", 0))
                 except (ValueError, TypeError):
                     current_val = 0.0
-                state["last_direction"] *= -1
+                state["last_direction"] = -state.get("dim_direction", state.get("last_direction", 1))
                 state["previous_level"] = current_val
                 state["is_dimming"] = False
                 self._save_dimmer_state()
+                self.mqtt_ack(str(int(current_val * 100)), dev, circuit, origin="rule")
+                self._rec(action, "executed", True, f"dimming stopped at {current_val:g} V")
             else:
                 self._dimmer_toggle(state, dev, circuit, level, action)
 
@@ -4011,41 +4036,45 @@ class UnipiBridge:
         if action:
             self._rec(action, "executed", True, f"dimmer {dev}/{circuit} -> {target_val:g} V")
 
-    async def _dimmer_hold_task(self, rule_id: str, dev: str, circuit: str) -> None:
-        """Async task that handles the dimming loop while button is held."""
+    async def _dimmer_hold_task(self, rule_id: str, dev: str, circuit: str, hold_ms: int = 500,
+                                speed: float = 2.5, min_v: float = 1.0, level: float = 10.0) -> None:
+        """While the button is held (after hold_ms): dim like a Z-Wave dimmer.
+        Direction alternates between holds; at the top it goes down, at the bottom (or when off) it goes up.
+        Dimming down stops at min_v and keeps the lamp ON; only a short press switches it off."""
+        key = f"{dev}_{circuit}"
         try:
-            # Wait for long press threshold (500ms)
-            await asyncio.sleep(0.5)
-            
+            await self._dim_sleep(hold_ms / 1000.0)
             state = self.dimmer_states.get(rule_id)
             if not state:
                 return
-                
             state["is_dimming"] = True
+            try:
+                cur = float(self.device_states.get(key, 0))
+            except (ValueError, TypeError):
+                cur = 0.0
             direction = state.get("last_direction", 1)
-            
-            step_time = 0.1  # 100ms per step
-            # 10V range over ~4 seconds = 2.5V/s = 0.25V per 100ms
-            step_size = 0.25 * direction
-            
+            if cur <= 0.05:                       # off: switch on at the lowest level, then brighten
+                cur, direction = min_v, 1
+                self.commands.send_ws(dev, circuit, round(cur, 2))
+                self.device_states[key] = cur
+            elif cur >= 10.0 - 0.05:
+                direction = -1
+            elif cur <= min_v + 0.05:
+                direction = 1
+            state["dim_direction"] = direction
+
+            step_time, n = 0.1, 0
+            step = speed * step_time * direction
             while True:
-                current_val_raw = self.device_states.get(f"{dev}_{circuit}", 0)
-                try:
-                    current_val = float(current_val_raw)
-                except (ValueError, TypeError):
-                    current_val = 0.0
-                    
-                new_val = current_val + step_size
-                new_val = max(0.0, min(10.0, new_val))
-                
-                if new_val != current_val:
-                    self.commands.send_ws(dev, circuit, round(new_val, 2))
-                    self.mqtt_ack(str(int(new_val * 100)), dev, circuit, origin="rule")
-                    # Optimistically update local state
-                    self.device_states[f"{dev}_{circuit}"] = new_val
-                
-                await asyncio.sleep(step_time)
-                
+                new = max(min_v, min(10.0, cur + step))
+                if new != cur:
+                    cur = new
+                    self.commands.send_ws(dev, circuit, round(cur, 2))
+                    self.device_states[key] = cur       # optimistic; evok confirms shortly after
+                    n += 1
+                    if n % 5 == 0:                      # keep HA in step without a message every 100 ms
+                        self.mqtt_ack(str(int(cur * 100)), dev, circuit, origin="rule")
+                await self._dim_sleep(step_time)
         except asyncio.CancelledError:
             pass
         except Exception as e:

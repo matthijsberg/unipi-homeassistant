@@ -82,4 +82,12 @@ Matthijs' rule "Serre Light" (button `xS51_03` → analog output `1_01` fade) ne
 **Rule activity** (answer to "show me the flow"): the engine keeps a 300-entry trace (trigger seen/matched, conditions failed and which one, disabled, gated by `when`, delayed, shadow, executed with what was sent, rejected/error); `GET /api/rule_trace?since=<n>`; the editor's right panel has a "Rule activity" list (text built with `textContent`) and the rule's block flashes (blue = trigger matched, green = executed, orange = stopped). Server-side, so a short button pulse is never missed (the old panel only sampled state once per second).
 Tests: 271 passed (+36); 10 mutation checks all caught. The editor still cannot be executed here (parser + structural tests only).
 
+# Follow-up 2026-10-09 (2): push-to-dim like a Z-Wave dimmer → `rc9`
+Matthijs: on/off works; push-and-hold must dim like a Z-Wave dimmer, he could not find how. It existed as the block "Dimmer Control (AO only)" but was hard to find and had traps: only worked if the trigger operator was manually set to ANY CHANGE, hold time fixed at 0.5 s, dimming down went to 0 V (lamp switched off), direction always "up first".
+- Now: tap = toggle (to the switch-on level, or where it was); hold longer than `dimmer_hold_ms` (default 800 in the editor) = dim while held, **direction alternates per hold**, at full brightness it goes down, off → comes on at the minimum and brightens; **dimming down stops at `dimmer_min` (lamp stays on)**, only a tap switches off; `dimmer_speed` V/s; stops on release; remembers the level across restarts; HA is kept in step every ~0.5 s plus a final value on release.
+- The rule always follows press **and** release whatever the IF operator says (the editor shows "any"); a failing condition blocks the press but never the release.
+- **Bug found by the new tests (not released):** a release whose press had been refused by a condition toggled the lamp off. Releases are now ignored unless their press was accepted.
+- Editor: block renamed "Push-to-dim light", fields for hold time / speed / lowest level; the "Runs: only when HA is unreachable" selector is removed from the editor (Matthijs: each function lives either in the Unipi or in HA, no automatic fallback). The `when` setting still exists in the rule JSON and is preserved if a rule has it.
+- Tests: 293 (+22); 11 mutation checks, 9 caught at once, 1 equivalent mutant (redundant branch, same behaviour), 1 real gap (final ack) → test strengthened → caught.
+
 # Open questions

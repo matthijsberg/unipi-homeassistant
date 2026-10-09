@@ -23,6 +23,11 @@ Open `http://<S103_IP>:8088`, log in. Pass when:
 3. Reload the page: every rule, field and the "Runs" setting is back; saving again changes nothing.
 4. Delete the test rules and save (leave the file as `[]`).
 
+# 1b. Push-to-dim (T17, rc9) — house impact: the lamp on the chosen analog output
+Block "Push-to-dim light" (circuit = the analog output of your lamp, switch-on level e.g. 8 V, hold time 800 ms). Pass: a tap switches the lamp on/off;
+holding longer than 0.8 s dims it up (lamp on) and keeps going until you let go; the next hold goes the other way; dimming down never switches
+the lamp off (it stops at the lowest level); a tap afterwards switches off and the next tap returns to the last level. HA's brightness follows.
+
 # 2. A real button through a local rule (T17) — house impact: the LED only
 Put a rule `di <your free input> eq 1 → pulse led 1_01 preset blink3`, `Runs: always`. Press the input: **the front LED blinks three times**
 (100 ms on / 250 ms off). Also check the bridge's attribute topic `unipi/<device>/led/1_01/attributes` shows `busy` then `busy:false`.

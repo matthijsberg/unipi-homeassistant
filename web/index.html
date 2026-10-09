@@ -447,12 +447,6 @@
                     this.appendDummyInput()
                         .appendField("Rule Name:")
                         .appendField(new Blockly.FieldTextInput("My Rule"), "NAME");
-                    this.appendDummyInput()
-                        .appendField("Runs")
-                        .appendField(new Blockly.FieldDropdown([
-                            ["always (locally, instantly)", "always"],
-                            ["only when Home Assistant is unreachable", "ha_offline"]
-                        ]), "WHEN");
                     this.appendValueInput("TRIGGER")
                         .setCheck("Trigger")
                         .appendField("IF");
@@ -567,7 +561,7 @@
             Blockly.Blocks['unipi_action_dimmer'] = {
                 init: function () {
                     this.appendDummyInput()
-                        .appendField("Dimmer Control (AO only)");
+                        .appendField("Push-to-dim light (analog output)");
                     this.appendDummyInput()
                         .appendField("Circuit")
                         .appendField(new Blockly.FieldTextInput("1_01"), "CIRCUIT");
@@ -575,11 +569,23 @@
                         .appendField("Switch-on level (V)")
                         .appendField(new Blockly.FieldNumber(10, 0.1, 10), "LEVEL");
                     this.appendDummyInput()
-                        .appendField("Hold to dim (needs trigger 'any')")
+                        .appendField("Hold to dim")
                         .appendField(new Blockly.FieldCheckbox("TRUE"), "HOLD");
+                    this.appendDummyInput()
+                        .appendField("Hold time (ms)")
+                        .appendField(new Blockly.FieldNumber(800, 200, 5000), "HOLD_MS");
+                    this.appendDummyInput()
+                        .appendField("Dim speed (V/s)")
+                        .appendField(new Blockly.FieldNumber(2.5, 0.2, 10), "SPEED");
+                    this.appendDummyInput()
+                        .appendField("Lowest dim level (V)")
+                        .appendField(new Blockly.FieldNumber(1, 0, 5), "MINV");
                     this.setOutput(true, "Action");
                     this.setColour(20);
-                    this.setTooltip("Dimmer: short press toggles to the switch-on level (remembered), long press dims. Untick 'hold' to toggle on the press edge only.");
+                    this.setTooltip("Like a Z-Wave dimmer. Tap the button: on (to the switch-on level, or where it was) / off. " +
+                        "Hold it longer than the hold time: the light dims up or down while you hold (next hold goes the other way), " +
+                        "and it stops when you let go. Dimming down stops at the lowest level; only a tap switches off. " +
+                        "The IF block only picks the button: its operator/value are ignored for this action (it follows press and release).");
                 }
             };
 
@@ -671,7 +677,6 @@
                     if (block.type !== 'unipi_rule') continue;
 
                     const name = block.getFieldValue('NAME');
-                    const when = block.getFieldValue('WHEN') || 'always';
                     // Fields this editor has no block for (and the rule id) are carried through unchanged,
                     // so saving here can never silently erase them.
                     let base = {};
@@ -715,6 +720,9 @@
                     let actionPulse = null;
                     let actionPreset = null;
                     let dimmerHold = true;
+                    let dimmerHoldMs = 800;
+                    let dimmerSpeed = 2.5;
+                    let dimmerMin = 1.0;
 
                     if (actionBlock.type === 'unipi_action') {
                         actionDev = actionBlock.getFieldValue('DEV');
@@ -728,6 +736,10 @@
                         actionCircuit = actionBlock.getFieldValue('CIRCUIT');
                         actionValue = parseFloat(actionBlock.getFieldValue('LEVEL')) || null;
                         dimmerHold = actionBlock.getFieldValue('HOLD') === 'TRUE';
+                        dimmerHoldMs = parseInt(actionBlock.getFieldValue('HOLD_MS'), 10) || 800;
+                        dimmerSpeed = parseFloat(actionBlock.getFieldValue('SPEED')) || 2.5;
+                        dimmerMin = parseFloat(actionBlock.getFieldValue('MINV'));
+                        if (isNaN(dimmerMin)) dimmerMin = 1.0;
                     } else if (actionBlock.type === 'unipi_action_pulse') {
                         actionType = "pulse";
                         actionDev = actionBlock.getFieldValue('DEV');
@@ -750,13 +762,15 @@
 
                     rules.push(Object.assign({}, base, {
                         name: name,
-                        when: when,
                         action_pulse: actionPulse,
                         action_preset: actionPreset,
                         dimmer_hold: dimmerHold,
+                        dimmer_hold_ms: dimmerHoldMs,
+                        dimmer_speed: dimmerSpeed,
+                        dimmer_min: dimmerMin,
                         trigger_dev: triggerDev,
                         trigger_circuit: triggerCircuit,
-                        trigger_operator: triggerOp,
+                        trigger_operator: (actionType === 'dimmer' && dimmerHold) ? 'any' : triggerOp,
                         trigger_value: triggerValue,
                         conditions: conditions,
                         action_type: actionType,
@@ -815,7 +829,6 @@
                         // Create Rule Block
                         const ruleBlock = workspace.newBlock('unipi_rule');
                         ruleBlock.setFieldValue(rule.name, 'NAME');
-                        ruleBlock.setFieldValue(rule.when || 'always', 'WHEN');
                         ruleBlock.data = JSON.stringify(rule);   // keep the full rule (id, unknown fields) for saving
                         if (rule.disabled_reason) {
                             ruleBlock.setWarningText("DISABLED - this rule does nothing until fixed: " + rule.disabled_reason);
@@ -865,6 +878,9 @@
                             actionBlock.setFieldValue(rule.action_circuit, 'CIRCUIT');
                             actionBlock.setFieldValue(rule.action_value ? String(rule.action_value) : '10', 'LEVEL');
                             actionBlock.setFieldValue(rule.dimmer_hold === false ? 'FALSE' : 'TRUE', 'HOLD');
+                            actionBlock.setFieldValue(String(rule.dimmer_hold_ms || 800), 'HOLD_MS');
+                            actionBlock.setFieldValue(String(rule.dimmer_speed || 2.5), 'SPEED');
+                            actionBlock.setFieldValue(String(rule.dimmer_min === undefined ? 1 : rule.dimmer_min), 'MINV');
                         } else if (rule.action_type === 'pulse') {
                             actionBlock = workspace.newBlock('unipi_action_pulse');
                             actionBlock.setFieldValue(canonDev(rule.action_dev), 'DEV');
