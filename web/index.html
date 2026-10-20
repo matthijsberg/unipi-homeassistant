@@ -351,14 +351,16 @@
                 </tr>
             </table>
 
-            <div class="login-form">
+            <form class="login-form" id="loginForm" onsubmit="return doLogin(event)">
                 <p id="loginError" style="color:red; display:none;"></p>
                 <p style="margin:0 0 10px 0; color:#666; font-size:0.9em;">Please use your system (Linux) username and
                     password.</p>
-                <input type="text" id="loginUser" placeholder="Username">
-                <input type="password" id="loginPass" placeholder="Password">
-                <button onclick="doLogin()">Log In</button>
-            </div>
+                <input type="text" id="loginUser" name="username" placeholder="Username" autocomplete="username"
+                    autocapitalize="none" spellcheck="false" tabindex="1" autofocus>
+                <input type="password" id="loginPass" name="password" placeholder="Password"
+                    autocomplete="current-password" tabindex="2">
+                <button type="submit" tabindex="3">Log In</button>
+            </form>
         </div>
     </div>
 
@@ -400,24 +402,6 @@
                         <!-- Rows injected here -->
                     </tbody>
                 </table>
-            </div>
-        </div>
-
-        <!-- Login Modal -->
-        <div id="loginModal" class="modal" style="display:none;">
-            <div class="modal-content" style="width: 300px; text-align: center;">
-                <h2>Login Required</h2>
-                <p id="loginError" style="color: red; display: none;"></p>
-                <div style="margin-bottom: 15px; text-align: left;">
-                    <label style="display:block; margin-bottom:5px;">Username</label>
-                    <input type="text" id="loginUser" style="width: 100%; padding: 8px; box-sizing: border-box;">
-                </div>
-                <div style="margin-bottom: 20px; text-align: left;">
-                    <label style="display:block; margin-bottom:5px;">Password</label>
-                    <input type="password" id="loginPass" style="width: 100%; padding: 8px; box-sizing: border-box;"
-                        onkeypress="if(event.key==='Enter') doLogin()">
-                </div>
-                <button class="btn-save" onclick="doLogin()" style="width: 100%;">Log In</button>
             </div>
         </div>
 
@@ -874,7 +858,7 @@
                 try {
                     const response = await fetch(API_URL);
                     if (response.status === 401) {
-                        showLoginModal("Please log in to view rules.");
+                        showLoginModal("Please log in to view rules.", true);
                         return;
                     }
 
@@ -1090,8 +1074,6 @@
 
             // --- Auth Logic ---
 
-            const loginModal = document.getElementById("loginModal");
-
             async function checkAuth() {
                 try {
                     const res = await fetch('/api/auth_check');
@@ -1114,8 +1096,6 @@
                 document.getElementById("userInfo").textContent = `User: ${username}`;
                 document.getElementById("userInfo").style.display = "inline";
                 document.getElementById("btnLogout").style.display = "inline";
-                // Hide old modal if open
-                if (loginModal) loginModal.style.display = "none";
 
                 // Fix Blockly rendering (it needs to know it is visible)
                 setTimeout(() => {
@@ -1127,6 +1107,18 @@
                 document.getElementById("loginScreen").style.display = "flex";
                 document.getElementById("app").style.display = "none";
                 fetchDeviceInfo();
+                setTimeout(() => { const u = document.getElementById("loginUser"); if (u) u.focus(); }, 50);
+            }
+
+            // The session is gone (or never existed): show the login page with a reason. The editor stays in
+            // memory behind it, so an unsaved rule is not lost; only a failed initial load is repeated after login.
+            let reloadAfterLogin = false;
+            function showLoginModal(message, reload = false) {
+                reloadAfterLogin = reloadAfterLogin || reload;
+                showLogin();
+                const errElem = document.getElementById("loginError");
+                errElem.textContent = message || "Please log in.";
+                errElem.style.display = "block";
             }
 
             async function fetchDeviceInfo() {
@@ -1149,7 +1141,8 @@
                 showApp(username);
             }
 
-            async function doLogin() {
+            async function doLogin(ev) {
+                if (ev && ev.preventDefault) ev.preventDefault();   // a form submit (Enter or the button) must not reload the page
                 const user = document.getElementById("loginUser").value;
                 const pass = document.getElementById("loginPass").value;
                 const errElem = document.getElementById("loginError");
@@ -1157,7 +1150,8 @@
                 if (!user || !pass) {
                     errElem.textContent = "Please enter username and password.";
                     errElem.style.display = "block";
-                    return;
+                    (user ? document.getElementById("loginPass") : document.getElementById("loginUser")).focus();
+                    return false;
                 }
 
                 try {
@@ -1172,10 +1166,12 @@
                         updateUserUI(data.username);
                         errElem.style.display = "none";
                         document.getElementById("loginPass").value = "";
-                        loadRules(); // Reload data
+                        if (reloadAfterLogin || !ruleBlocks().length) { reloadAfterLogin = false; loadRules(); }
                     } else {
                         errElem.textContent = "Login failed. Check credentials.";
                         errElem.style.display = "block";
+                        const pw = document.getElementById("loginPass");
+                        pw.value = ""; pw.focus();
                     }
                 } catch (e) {
                     console.error(e);

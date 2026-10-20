@@ -2,7 +2,7 @@
 // Where it matters it is as strict as the real thing: setFieldValue on an unknown field throws, a dropdown ignores
 // values that are not one of its options, getFieldValue of an unknown field returns null.
 var __errors = [], __timers = [], __timeouts = [], __calls = [], __state = { rules: [], trace: [], putStatus: 200, putBody: null, nextId: 1,
-  confirmAnswer: true, testStatus: 200, testBody: { ok: true, events: [] } };
+  loggedIn: true, confirmAnswer: true, testStatus: 200, testBody: { ok: true, events: [] } };
 var __confirms = [];
 function confirm(msg) { __confirms.push(String(msg)); return __state.confirmAnswer; }
 var console = { log() {}, warn() {}, info() {}, error() { __errors.push(Array.prototype.map.call(arguments, String).join(' ')); } };
@@ -43,6 +43,8 @@ function __resp(status, body) { return Promise.resolve({ status, ok: status >= 2
 function fetch(url, opts) {
   opts = opts || {}; const method = opts.method || 'GET';
   __calls.push({ url, method, body: opts.body || null });
+  if (url.indexOf('/api/rules') === 0 && !__state.loggedIn) return __resp(401, { error: 'Unauthorized' });
+  if (url === '/api/login' && method === 'POST') { const b = JSON.parse(opts.body); if (b.password === 'good') { __state.loggedIn = true; return __resp(200, { username: b.username }); } return __resp(401, { error: 'bad' }); }
   if (url === '/api/rules' && method === 'GET') return __resp(200, JSON.parse(JSON.stringify(__state.rules)));
   if (url === '/api/rules' && method === 'PUT') {
     __state.putBody = JSON.parse(opts.body);
@@ -52,7 +54,7 @@ function fetch(url, opts) {
   }
   if (url.indexOf('/api/rule_trace') === 0) { const since = parseInt(url.split('since=')[1] || '0', 10); return __resp(200, { last: __state.trace.length ? __state.trace[__state.trace.length - 1].seq : since, events: __state.trace.filter(e => e.seq > since) }); }
   if (/^\/api\/rules\/[^/]+\/test$/.test(url) && method === 'POST') return __resp(__state.testStatus, JSON.parse(JSON.stringify(__state.testBody)));
-  if (url === '/api/auth_check') return __resp(200, { authenticated: true, username: 'tester' });
+  if (url === '/api/auth_check') return __resp(200, __state.loggedIn ? { authenticated: true, username: 'tester' } : { authenticated: false });
   if (url === '/api/info') return __resp(200, { name: 'Neuron_S103_2258', model: 'Neuron S103', sn: 2258, ip: '10.0.0.2' }); // pii-ok (fake test data)
   if (url === '/api/status') return __resp(200, {});
   if (url === '/api/inputs') return __resp(200, []);
