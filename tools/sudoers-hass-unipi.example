@@ -1,0 +1,6 @@
+# Allow the bridge's extension watchdog (user "unipi") to restart evok - and ONLY that (plus the optional reboot).
+# Install on a box that does NOT already give this user passwordless sudo:
+#   sudo install -m 0440 tools/sudoers-hass-unipi.example /etc/sudoers.d/hass-unipi && sudo visudo -c
+unipi ALL=(root) NOPASSWD: /usr/bin/systemctl restart evok
+# Only if "watchdog_reboot": true is set in config.json:
+# unipi ALL=(root) NOPASSWD: /usr/bin/systemctl reboot
