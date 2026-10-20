@@ -77,6 +77,11 @@ Digital-input values are logical from the WS edge on: `device_states`, rules and
 `_publish_attributes`, `_sequencer_watchdog`, `_shutdown_outputs`. Circuit options live in `circuits.py`
 (`failsafe_off, max_on_s, pulse_defaults, max_count, max_pulse_ms, presets`; digital outputs only).
 
+# extension watchdog (T43)
+
+`unipi_core/extwatch.py` `ExtensionWatchdog` (pure state machine, `observe(slaves) -> action|None`, persisted history). Bridge: `_monitor_extensions` →
+`_extension_watchdog_step` → `_run_watchdog_action` (subprocess), `_publish_watchdog_status/discovery` (HA sensor). Config: `extensions.watchdog*`.
+
 # Tooling (T03)
 
 `tools/{backup.sh,deploy.sh,rollback.sh,healthcheck.py}` — see `tools/README.md`. Deploy = preflight → backup →

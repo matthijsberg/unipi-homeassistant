@@ -23,7 +23,11 @@
   },
   "extensions": {
     "check_interval": 60,
-    "max_comm_delay": 10
+    "max_comm_delay": 10,
+    "watchdog": true,
+    "watchdog_down_after_s": 180,
+    "watchdog_max_actions_per_day": 8,
+    "watchdog_reboot": false
   },
   "web_server": {
     "enabled": true,

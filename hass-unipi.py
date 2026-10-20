@@ -36,6 +36,7 @@ from aiohttp import web
 from unipi_core.circuits import CircuitConfig, CircuitRegistry, canonicalize_circuits, normalize_dev
 from unipi_core.commands import CommandService
 from unipi_core.events import AVAILABILITY, INPUT_CHANGED, OUTPUT_CHANGED, EventBus
+from unipi_core.extwatch import REBOOT, RESTART_EVOK, ExtensionWatchdog, WatchdogSettings
 from unipi_core.sequencer import (
     OutputSequencer,
     SequenceRejected,
@@ -86,7 +87,7 @@ else:
     print("Required libraries check passed.")
 
 # --- Script Version ---
-SCRIPT_VERSION = "2.2.0-rc15"
+SCRIPT_VERSION = "2.2.0-rc16"
 
 # --- Constants ---
 # Last discovered device name, so the MQTT last-will can use the device's own
@@ -158,6 +159,14 @@ class LoggingConfig(BaseModel):
 class ExtensionsConfig(BaseModel):
     check_interval: int = 60
     max_comm_delay: int = 10
+    # Extension watchdog (unipi_core/extwatch.py): if a serial extension (xS51 ...) stops answering, restart evok
+    # (measured: that brings it back in seconds). Only acts when evok reports such an extension.
+    watchdog: bool = True
+    watchdog_down_after_s: int = Field(180, ge=30)         # silent this long before anything is done
+    watchdog_max_actions_per_day: int = Field(8, ge=1)
+    watchdog_reboot: bool = False                           # opt in: reboot the host as a last step (after 2 evok restarts)
+    watchdog_restart_command: list[str] = Field(default_factory=lambda: ["sudo", "-n", "systemctl", "restart", "evok"])
+    watchdog_reboot_command: list[str] = Field(default_factory=lambda: ["sudo", "-n", "systemctl", "reboot"])
 
 
 class WebServerConfig(BaseModel):
@@ -670,6 +679,12 @@ class UnipiBridge:
 
         # State
         self.shadow: bool = self.config.mode == "shadow"
+        ext = self.config.extensions
+        self.ext_watchdog = ExtensionWatchdog(
+            WatchdogSettings(enabled=ext.watchdog and not self.shadow, down_after_s=ext.watchdog_down_after_s,
+                             max_actions_per_day=ext.watchdog_max_actions_per_day, reboot_enabled=ext.watchdog_reboot),
+            state_file=os.path.join(os.path.dirname(rules_path), "extension_watchdog_state.json"), logger=self.logger)
+        self._watchdog_published: str | None = None
         self.device_name: str = self._load_cached_device_name()
         # Topic of the last-will registered with the broker on (re)connect
         self._lwt_topic: str = ""
@@ -1463,6 +1478,7 @@ class UnipiBridge:
                         "/vdd",
                         "/vad",
                         "/vis",
+                        "/extension_watchdog/attributes",
                     )
                 )
                 self.mqtt_client.publish(topic, value, qos=1, retain=should_retain)
@@ -2133,6 +2149,8 @@ class UnipiBridge:
                                     f"Extension Monitor: Extension {circuit} is DOWN! Last comm: {last_comm}s ago."
                                 )
 
+                        await self._extension_watchdog_step(slaves)
+
                         # Process 1wdevice updates since EVOK websocket doesn't always send them
                         onewire_devices = [d for d in data if d.get("dev") == "1wdevice"]
                         if onewire_devices:
@@ -2149,6 +2167,64 @@ class UnipiBridge:
                 self.logger.error(f"Extension Monitor: Error: {e}")
                 await asyncio.sleep(10)  # Wait a bit before retrying on error
 
+    async def _extension_watchdog_step(self, slaves: list[dict[str, Any]]) -> None:
+        """One watchdog decision per monitor cycle; executes the step and tells Home Assistant."""
+        try:
+            action = self.ext_watchdog.observe(slaves)
+            if action:
+                self._publish_watchdog_status(force=True, note=f"running: {action}")
+                await self._run_watchdog_action(action)
+            self._publish_watchdog_status()
+        except Exception as e:
+            self.logger.error(f"Extension watchdog: error: {e}")
+
+    async def _run_watchdog_action(self, kind: str) -> None:
+        ext = self.config.extensions
+        cmd = ext.watchdog_restart_command if kind == RESTART_EVOK else ext.watchdog_reboot_command
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            _, err = await asyncio.wait_for(proc.communicate(), timeout=60)
+            if proc.returncode != 0:
+                self.ext_watchdog.action_failed(kind, f"{' '.join(cmd)} -> exit {proc.returncode}: {err.decode(errors='replace').strip()[:200]}")
+            else:
+                self.logger.warning(f"Extension watchdog: '{' '.join(cmd)}' done.")
+        except Exception as e:
+            self.ext_watchdog.action_failed(kind, f"{' '.join(cmd)}: {e}")
+
+    def _watchdog_topic(self, leaf: str) -> str:
+        return f"{self.config.mqtt.topic}/{self.device_name}_bridge/extension_watchdog/{leaf}"
+
+    def _publish_watchdog_status(self, force: bool = False, note: str | None = None) -> None:
+        """Publish state (+ attributes) when it changed. Retained, so Home Assistant has it after a restart."""
+        if not self.device_name or not self.ext_watchdog.s.enabled:
+            return
+        st = self.ext_watchdog.status()
+        if note:
+            st["note"] = note
+        key = json.dumps({k: v for k, v in st.items() if k != "extensions"}, sort_keys=True, default=str)
+        if not force and key == self._watchdog_published:
+            return
+        self._watchdog_published = key
+        for leaf, payload in (("state", st["state"]), ("attributes", json.dumps(st, default=str))):
+            self._enqueue_ws_to_mqtt((self._watchdog_topic(leaf), payload))
+
+    def _publish_watchdog_discovery(self) -> None:
+        if not self.device_name or not self.ext_watchdog.s.enabled:
+            return
+        root = self.config.mqtt.topic
+        dev = {"identifiers": [f"{self.device_name}_bridge"], "name": f"Unipi {self.device_name} Bridge",
+               "manufacturer": "Unipi Technology s.r.o.", "model": "MQTT Bridge", "sw_version": SCRIPT_VERSION}
+        cfg = {
+            "name": "Extension watchdog" + self._shadow_tag(), "unique_id": f"{self.device_name}_ext_watchdog", "dev": dev,
+            "origin": {"name": "Unipi - HomeAssistant", "sw": SCRIPT_VERSION, "url": "https://github.com/matthijsberg/unipi-homeassistant"},
+            "state_topic": self._watchdog_topic("state"), "json_attributes_topic": self._watchdog_topic("attributes"),
+            "icon": "mdi:restart-alert",
+            "availability_topic": f"{root}/{self.device_name}/status", "payload_available": "online", "payload_not_available": "offline",
+        }
+        self._enqueue_ws_to_mqtt((f"{self.config.mqtt.discovery_prefix}/sensor/{self.device_name}_ext_watchdog/config", json.dumps(cfg)))
+        self._watchdog_published = None      # (re)publish the current state after the config
+
     @log_function
     def publish_bridge_discovery(self) -> None:
         """
@@ -2161,6 +2237,7 @@ class UnipiBridge:
             return
 
         self.logger.info(f"Publishing Bridge Discovery for device: {self.device_name}")
+        self._publish_watchdog_discovery()
         discovery_prefix = self.config.mqtt.discovery_prefix
         root_topic = self.config.mqtt.topic
         device_topic = f"{root_topic}/{self.device_name}_bridge"
