@@ -24,10 +24,10 @@ def base(**kw):
 
 
 class Editor:
-    def __init__(self, rules, trace=None):
+    def __init__(self, rules, trace=None, logged_in=True):
         self.ctx = quickjs.Context()
         self.ctx.eval(HARNESS)
-        self.ctx.eval("__state.rules = %s; __state.trace = %s;" % (json.dumps(rules), json.dumps(trace or [])))
+        self.ctx.eval("__state.rules = %s; __state.trace = %s; __state.loggedIn = %s;" % (json.dumps(rules), json.dumps(trace or []), json.dumps(logged_in)))
         self.ctx.eval(SCRIPT)
         self.settle()
 
@@ -389,3 +389,70 @@ def test_a_click_event_also_selects_and_a_deleted_block_does_not():
     ed.run("__calls.length = 0; workspace.fire({type: Blockly.Events.SELECTED, newElementId: 'blk_does_not_exist'})")
     press_test(ed)                                                    # unknown id: the previous target stays
     assert [c["url"] for c in posted(ed)] == ["/api/rules/b/test"]
+
+
+# ---- login: one real form (Tab moves on, Enter submits), session expiry is visible ----------------------------------------------
+def shown(ed, el):
+    return ed.js("document.getElementById(%s).style.display" % json.dumps(el))
+
+
+def submit_login(ed, user, password):
+    ed.run("document.getElementById('loginUser').value = %s; document.getElementById('loginPass').value = %s; "
+           "var __ev = {prevented: 0, preventDefault() { this.prevented++; }}; doLogin(__ev)" % (json.dumps(user), json.dumps(password)))
+    return ed.js("__ev.prevented")
+
+
+def test_logged_out_page_shows_the_login_screen_and_the_reason():
+    ed = Editor(RULES, logged_in=False)
+    assert shown(ed, "loginScreen") == "flex" and shown(ed, "app") == "none"
+    assert "log in to view rules" in ed.js("document.getElementById('loginError').textContent")
+    assert ed.errors() == []
+
+
+def test_login_submit_is_not_a_page_reload_and_loads_the_rules():
+    ed = Editor(RULES, logged_in=False)
+    assert submit_login(ed, "unipi", "good") == 1                     # preventDefault: the form must not navigate
+    assert shown(ed, "app") == "flex" and shown(ed, "loginScreen") == "none"
+    assert ed.js("document.getElementById('loginPass').value") == ""
+    assert [r["name"] for r in ed.rules_blocks()] == ["Serre Light", "Serre Dim", "Doorbell", "Odd one"]
+
+
+def test_wrong_password_and_empty_fields_are_reported_with_focus_on_the_right_field():
+    ed = Editor(RULES, logged_in=False)
+    ed.run("var __focus = []; ['loginUser','loginPass'].forEach(function(id){ var e = document.getElementById(id); e.focus = function(){ __focus.push(id); }; })")
+    submit_login(ed, "unipi", "nope")
+    assert "Login failed" in ed.js("document.getElementById('loginError').textContent") and shown(ed, "app") == "none"
+    assert ed.js("__focus.slice(-1)[0]") == "loginPass"
+    submit_login(ed, "", "")
+    assert "enter username" in ed.js("document.getElementById('loginError').textContent").lower() and ed.js("__focus.slice(-1)[0]") == "loginUser"
+    submit_login(ed, "unipi", "")
+    assert ed.js("__focus.slice(-1)[0]") == "loginPass"
+    assert not [c for c in ed.js("__calls") if c["url"] == "/api/login"][1:]       # empty fields never reach the server
+
+
+def test_session_expiry_while_saving_shows_login_and_keeps_the_unsaved_editor():
+    ed = Editor(RULES)
+    rule = "workspace.getTopBlocks(true).filter(b=>b.type==='unipi_rule')[0]"
+    ed.run(f"{rule}.setFieldValue('Edited but not saved','NAME'); __state.loggedIn = false")
+    ed.save()
+    assert shown(ed, "loginScreen") == "flex" and shown(ed, "app") == "none"
+    assert "log in to save" in ed.js("document.getElementById('loginError').textContent").lower()
+    assert submit_login(ed, "unipi", "good") == 1
+    assert ed.rules_blocks()[0]["name"] == "Edited but not saved"                     # not reloaded over the user's edit
+    assert shown(ed, "app") == "flex"
+
+
+def test_login_page_is_a_real_form_with_a_sane_tab_order():
+    form = re.search(r'<form[^>]*id="loginForm".*?</form>', HTML, re.S).group(0)
+    assert 'onsubmit="return doLogin(event)"' in form and 'type="submit"' in form
+    idx = [int(x) for x in re.findall(r'tabindex="(\d+)"', form)]
+    assert idx == [1, 2, 3] and form.index('id="loginUser"') < form.index('id="loginPass"') < form.index('type="submit"')
+    assert 'autocomplete="username"' in form and 'autocomplete="current-password"' in form
+    assert "onclick=\"doLogin()\"" not in HTML and "loginModal" not in HTML           # no second, dead login dialog
+
+
+def test_no_element_id_is_used_twice_and_every_login_helper_exists():
+    ids = re.findall(r'\bid="([^"]+)"', HTML)
+    assert sorted({i for i in ids if ids.count(i) > 1}) == []                             # duplicate ids made the login fields ambiguous
+    for fn in set(re.findall(r"\b(showLoginModal|showLogin|doLogin|checkAuth)\(", SCRIPT)):
+        assert re.search(r"function %s\(" % fn, SCRIPT), fn + " is called but never defined"
