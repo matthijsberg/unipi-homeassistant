@@ -11,6 +11,8 @@ auto_rollback=1; dry=0
 for a in "$@"; do case "$a" in --no-rollback) auto_rollback=0;; --dry-run) dry=1;; *) echo "unknown option $a" >&2; exit 2;; esac; done
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Release layout (ADR-006: /opt/unipi-ha/current is a symlink)? Then deploy that way. The S103 stays on the classic mode below.
+if [ -L "${UNIPI_PREFIX:-}/opt/unipi-ha/current" ]; then exec "$REPO/tools/deploy-release.sh" "$tag" "$@"; fi
 RUNTIME="${UNIPI_RUNTIME:-/home/unipi/unipi-homeassistant/scripts}"
 VENV="${UNIPI_VENV:-/home/unipi/unipi-homeassistant}"
 SERVICE="${UNIPI_SERVICE:-hass-unipi}"

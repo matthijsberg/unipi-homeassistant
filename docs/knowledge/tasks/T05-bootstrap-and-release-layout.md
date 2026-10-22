@@ -4,7 +4,7 @@ id: T05
 title: "Build the BaseOS bootstrap, release layout and site-bundle tooling"
 description: "tools/bootstrap.sh, tools/site-bundle.sh and release-aware deploy/rollback exist; the bridge accepts a state dir and --check-config; all default-off for the live S103."
 phase: 0
-task_status: todo
+task_status: done
 depends_on: [T03, T04]
 risk: medium
 human_gate: false
@@ -73,6 +73,12 @@ ADR-006 → `status: stable` after Matthijs reviews; `/runbooks/deploy.md` (rele
 `/context/code-map.md` (tooling); `/log.md`.
 
 # Evidence
+- 2026-10-22 (`v2.2.0-rc17`): built and tested **offline in temp trees** (no root, no systemd, no apt): `hass-unipi.py --check-config` (one-line summary, exit 0/2, never prints secrets, starts nothing) and `UNIPI_HA_STATE_DIR` (device-name cache, dimmer state, watchdog state; unset = unchanged S103 behaviour); `systemd/hass-unipi.service` (release layout, `ExecStartPre --check-config`); `tools/site_bundle.py` + `site-bundle.sh` (export/list/import, sha256 manifest, mode 600, no overwrite without `--force`, old file kept as `.pre-import-*`); `tools/lib-release.sh` (unpack by tag, venv by requirements+python hash, atomic `current` flip, `previous`, prune); `tools/bootstrap.sh` (idempotent, `--dry-run`, `--prefix`, exit 10 = reboot needed, options validated before any change); `tools/deploy-release.sh` (config checked with the NEW code before the flip, site-bundle safety copy, fresh health check, automatic flip back); `deploy.sh`/`rollback.sh previous|<tag>` switch to it only when `$PREFIX/opt/unipi-ha/current` is a symlink - the S103's classic mode is untouched.
+- Tests: `tests/test_bootstrap.py` (21: bundle round trip/tamper/overwrite, dry run changes nothing, full layout, **second run changes nothing (tree, contents, mtimes, modes)**, second tag shares the venv, bad input refused before any change, invalid config stops it, evok config applied with original kept, ssh key once, deploy flip/restart, **unhealthy release flips back**, release that cannot start with the live config is never activated, rollback previous/tag, dry run, prune) and `tests/test_check_config.py` (7). Mutation checks: 20 on the tooling, 19 caught at once; 1 survivor (prune could delete the current release when it is old) → test added → caught.
+- Real bugs found by the tests: the venv hash included the release path (every tag would have built its own venv); `--harden-ssh` without a key was only rejected at the very end (after installing everything); a missing file made the summary exit non-zero under `pipefail`; multi-line pydantic errors broke the one-line `--check-config` contract.
+- Unipi's repo script URL taken from the official evok install guide (`https://repo.unipi.technology/debian/raspberry-neuron.sh`, run as root, then reboot); **not executed here** - verify on the real image in T06/T31 (`--unipi-script-url` overrides it).
+- **Not done / needs a real machine**: a run on a clean arm64 Debian 12 / BaseOS (T06), the apt/evok/systemd/healthcheck paths (skipped by `--prefix`), `--harden-ssh` end to end.
+
 
 # Open questions
 - Does Unipi's `raspberry-neuron.sh` need a reboot on BaseOS (assumed yes)? Resolved in T06/T31.

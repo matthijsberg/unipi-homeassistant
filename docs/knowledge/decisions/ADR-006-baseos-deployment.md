@@ -91,6 +91,13 @@ with the last exported bundle.
 new release, builds the venv if needed, flips `current`, restarts, runs the fresh health check and
 **flips the symlink back automatically** on failure (seconds, no file copying).
 
+# Implementation note (T05, 2026-10-22)
+Built as specified, with these concrete choices: site bundle logic in `tools/site_bundle.py` (`site-bundle.sh` is a wrapper);
+shared release functions in `tools/lib-release.sh`; release-mode deploy in `tools/deploy-release.sh`; `current` and
+`releases/<tag>/.venv` are relative symlinks (the tree can be relocated); `previous` records the release before the current one;
+the unit runs `--check-config` before every start. Unipi's repo script: `https://repo.unipi.technology/debian/raspberry-neuron.sh`
+(from the official evok install guide; still to be verified on the real image in T06/T31).
+
 # Consequences
 - The L513 rebuild (T31) is scripted and repeatable; a lost SD card is a 20-minute job.
 - The first install on real hardware happens in the maintenance window; everything except

@@ -11,6 +11,14 @@ RUNTIME="${UNIPI_RUNTIME:-/home/unipi/unipi-homeassistant/scripts}"
 VENV="${UNIPI_VENV:-/home/unipi/unipi-homeassistant}"
 SERVICE="${UNIPI_SERVICE:-hass-unipi}"
 
+# Release layout: `previous` or a tag that is still on disk = flip (no rebuild); needs no backup directory.
+if [ -L "${UNIPI_PREFIX:-}/opt/unipi-ha/current" ]; then
+  if [ "$target" = previous ]; then
+    target="$(cat "${UNIPI_PREFIX:-}/opt/unipi-ha/previous" 2>/dev/null || true)"
+    [ -n "$target" ] || { echo "no previous release recorded" >&2; exit 2; }
+  fi
+  exec "$REPO/tools/deploy-release.sh" "$target" --no-rollback
+fi
 if [ ! -d "$target" ]; then exec "$REPO/tools/deploy.sh" "$target" --no-rollback; fi
 
 tgz="$target/runtime.tgz"; [ -f "$tgz" ] || { echo "no runtime.tgz in $target" >&2; exit 2; }

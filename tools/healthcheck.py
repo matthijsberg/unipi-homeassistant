@@ -37,6 +37,8 @@ def sysd(unit, *props):
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--runtime", default=os.environ.get("UNIPI_RUNTIME", "/home/unipi/unipi-homeassistant/scripts"))
+    ap.add_argument("--config", default=None, help="config.json (release layout: /etc/unipi-ha/config.json); default: <runtime>/config.json")
+    ap.add_argument("--state-dir", default=None, help="where .device_name lives (release layout: /var/lib/unipi-ha); default: <runtime>")
     ap.add_argument("--service", default=os.environ.get("UNIPI_SERVICE", "hass-unipi"))
     ap.add_argument("--timeout", type=int, default=90)
     ap.add_argument("--fresh", action="store_true", help="require live publishes (use right after a restart)")
@@ -46,8 +48,8 @@ def main() -> int:
     a = ap.parse_args()
 
     try:
-        cfg = json.load(open(os.path.join(a.runtime, "config.json")))["mqtt"]
-        device = open(os.path.join(a.runtime, ".device_name")).read().strip()
+        cfg = json.load(open(a.config or os.path.join(a.runtime, "config.json")))["mqtt"]
+        device = open(os.path.join(a.state_dir or a.runtime, ".device_name")).read().strip()
         version = a.expect_version
         if not version:
             m = re.search(r'^SCRIPT_VERSION\s*=\s*"([^"]+)"', open(os.path.join(a.runtime, "hass-unipi.py")).read(), re.M)

@@ -18,6 +18,7 @@ import random
 import logging.handlers
 import os
 import asyncio
+import sys
 import signal
 import secrets
 import uuid
@@ -87,13 +88,19 @@ else:
     print("Required libraries check passed.")
 
 # --- Script Version ---
-SCRIPT_VERSION = "2.2.0-rc16"
+SCRIPT_VERSION = "2.2.0-rc17"
 
 # --- Constants ---
 # Last discovered device name, so the MQTT last-will can use the device's own
 # status topic from the very first connect (before evok has been queried).
+# Where runtime state lives. Unset (the S103 today): next to the script / the rules file. In the release layout
+# (ADR-006) the service sets UNIPI_HA_STATE_DIR=/var/lib/unipi-ha so releases hold code only.
+def _state_dir() -> str | None:
+    return os.environ.get("UNIPI_HA_STATE_DIR") or None
+
+
 DEVICE_NAME_CACHE_FILE = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), ".device_name"
+    _state_dir() or os.path.dirname(os.path.abspath(__file__)), ".device_name"
 )
 
 # Exit (and let systemd restart us) if MQTT stays down longer than this.
@@ -669,7 +676,8 @@ class UnipiBridge:
         rules_path = os.path.join(os.path.dirname(os.path.abspath(config_path)), "local_rules.json")
         # Home Assistant reachability (birth/last-will on <discovery_prefix>/status); None = never seen
         self.ha_online: bool | None = None
-        self._dimmer_state_file = os.path.join(os.path.dirname(rules_path), "local_rules_state.json")
+        state_dir = _state_dir() or os.path.dirname(rules_path)
+        self._dimmer_state_file = os.path.join(state_dir, "local_rules_state.json")
         self._dim_sleep = asyncio.sleep   # replaced in tests so dimming can run on a fake clock
         self.dimmer_persist: dict[str, dict[str, Any]] = self._load_dimmer_state()
         self.local_logic = LocalLogicEngine(rules_path, self.logger, validator=self.validate_rule)
@@ -683,7 +691,7 @@ class UnipiBridge:
         self.ext_watchdog = ExtensionWatchdog(
             WatchdogSettings(enabled=ext.watchdog and not self.shadow, down_after_s=ext.watchdog_down_after_s,
                              max_actions_per_day=ext.watchdog_max_actions_per_day, reboot_enabled=ext.watchdog_reboot),
-            state_file=os.path.join(os.path.dirname(rules_path), "extension_watchdog_state.json"), logger=self.logger)
+            state_file=os.path.join(state_dir, "extension_watchdog_state.json"), logger=self.logger)
         self._watchdog_published: str | None = None
         self.device_name: str = self._load_cached_device_name()
         # Topic of the last-will registered with the broker on (re)connect
@@ -4689,6 +4697,36 @@ class UnipiBridge:
             return web.json_response({"error": str(e)}, status=500)
 
 
+def check_config(config_file: str) -> tuple[int, str]:
+    """Validate the config (and the rules file next to it) without starting anything. (exit code, one-line summary).
+    Never prints secrets. Used by bootstrap.sh / deploy to refuse a release that cannot start."""
+    def one_line(e: Exception) -> str:       # callers read the LAST line; pydantic errors span many
+        return " ".join(str(e).split())[:300]
+
+    try:
+        cfg = AppConfig.load_from_env_and_file(config_file)
+    except Exception as e:
+        return 2, f"INVALID config {config_file}: {one_line(e)}"
+    notes = []
+    rules_path = os.path.join(os.path.dirname(os.path.abspath(config_file)), "local_rules.json")
+    n_rules = 0
+    if os.path.exists(rules_path):
+        try:
+            with open(rules_path) as f:
+                raw = json.load(f)
+            if not isinstance(raw, list):
+                return 2, f"INVALID rules {rules_path}: expected a JSON list"
+            for item in raw:
+                LocalLogicRule(**item)
+            n_rules = len(raw)
+        except Exception as e:
+            return 2, f"INVALID rules {rules_path}: {one_line(e)}"
+    notes.append(f"{n_rules} rule(s)")
+    return 0, (f"OK config={config_file} mode={cfg.mode} mqtt={cfg.mqtt.broker}:{cfg.mqtt.port} "
+               f"evok={cfg.unipi_http.url} circuits={len(cfg.circuits)} web_ui={'on' if cfg.web_server.enabled else 'off'} "
+               + ", ".join(notes))
+
+
 if __name__ == "__main__":
     # Argument Parsing
     parser = argparse.ArgumentParser(description="Unipi to Home Assistant Bridge")
@@ -4698,7 +4736,15 @@ if __name__ == "__main__":
     parser.add_argument(
         "--record", type=str, help="Enable traffic recording to the specified JSON file"
     )
+    parser.add_argument(
+        "--check-config", action="store_true",
+        help="Validate the configuration and rules, print a one-line summary and exit (0 ok, 2 invalid)",
+    )
     args = parser.parse_args()
+    if args.check_config:
+        code, summary = check_config(args.config)
+        print(summary)
+        sys.exit(code)
 
     config_file = args.config
     if not os.path.exists(config_file):

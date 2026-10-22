@@ -37,3 +37,6 @@ docs/knowledge/local/
 # private site bundles (contain secrets)
 *.site.tgz
 site-*.tgz
+# site bundles hold passwords: never in git
+*.site.tgz
+site-*.tgz
