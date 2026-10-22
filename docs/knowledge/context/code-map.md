@@ -82,6 +82,10 @@ Digital-input values are logical from the WS edge on: `device_states`, rules and
 `unipi_core/extwatch.py` `ExtensionWatchdog` (pure state machine, `observe(slaves) -> action|None`, persisted history). Bridge: `_monitor_extensions` →
 `_extension_watchdog_step` → `_run_watchdog_action` (subprocess), `_publish_watchdog_status/discovery` (HA sensor). Config: `extensions.watchdog*`.
 
+# release layout + bootstrap (T05)
+
+`check_config()` / `--check-config` and `_state_dir()` (`UNIPI_HA_STATE_DIR`) in `hass-unipi.py`; `tools/{bootstrap.sh,lib-release.sh,deploy-release.sh,site_bundle.py}`, `systemd/hass-unipi.service`.
+
 # Tooling (T03)
 
 `tools/{backup.sh,deploy.sh,rollback.sh,healthcheck.py}` — see `tools/README.md`. Deploy = preflight → backup →

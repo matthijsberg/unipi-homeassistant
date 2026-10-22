@@ -1,0 +1,18 @@
+[Unit]
+Description=Unipi to Home Assistant bridge (hass-unipi)
+Wants=network-online.target
+After=network-online.target evok.service
+# Never stop retrying, however often it restarts
+StartLimitIntervalSec=0
+
+[Service]
+User=unipi
+Environment=UNIPI_HA_STATE_DIR=/var/lib/unipi-ha
+WorkingDirectory=/var/lib/unipi-ha
+ExecStartPre=/opt/unipi-ha/current/.venv/bin/python /opt/unipi-ha/current/hass-unipi.py --check-config --config /etc/unipi-ha/config.json
+ExecStart=/opt/unipi-ha/current/.venv/bin/python /opt/unipi-ha/current/hass-unipi.py --config /etc/unipi-ha/config.json
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
