@@ -18,6 +18,7 @@ import random
 import logging.handlers
 import os
 import asyncio
+import socket
 import sys
 import signal
 import secrets
@@ -25,7 +26,7 @@ import uuid
 from dataclasses import dataclass
 from functools import wraps
 from typing import Any, Callable, Literal
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit, urlunsplit
 import importlib
 
 import paho.mqtt.client as mqtt
@@ -88,7 +89,7 @@ else:
     print("Required libraries check passed.")
 
 # --- Script Version ---
-SCRIPT_VERSION = "2.2.0-rc17"
+SCRIPT_VERSION = "2.2.0-rc18"
 
 # --- Constants ---
 # Last discovered device name, so the MQTT last-will can use the device's own
@@ -97,6 +98,40 @@ SCRIPT_VERSION = "2.2.0-rc17"
 # (ADR-006) the service sets UNIPI_HA_STATE_DIR=/var/lib/unipi-ha so releases hold code only.
 def _state_dir() -> str | None:
     return os.environ.get("UNIPI_HA_STATE_DIR") or None
+
+
+_LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "::1")
+
+
+def evok_url_to_loopback(url: str) -> str:
+    """If `url` points at THIS machine through its network address (e.g. ws://<LAN-IP>:8080/ws), return the same
+    URL on 127.0.0.1. Evok runs on the same box; reaching it through the LAN address makes the bridge - and with it
+    every local rule - depend on the network: when the interface loses its address (switch reboot, DHCP change) the
+    connection to evok breaks although evok itself is fine. Anything that is not this machine is returned unchanged."""
+    try:
+        u = urlsplit(url)
+        host = u.hostname
+        if not host or host.lower() in _LOOPBACK_HOSTS:
+            return url
+        try:
+            socket.inet_pton(socket.AF_INET6 if ":" in host else socket.AF_INET, host)
+            is_ip = True
+        except OSError:
+            is_ip = False
+        if is_ip:       # an address is local exactly when we can bind to it
+            s = socket.socket(socket.AF_INET6 if ":" in host else socket.AF_INET)
+            try:
+                s.bind((host, 0))
+            except OSError:
+                return url
+            finally:
+                s.close()
+        elif host.split(".")[0].lower() != socket.gethostname().split(".")[0].lower():
+            return url
+        netloc = "127.0.0.1" + (f":{u.port}" if u.port else "")
+        return urlunsplit(u._replace(netloc=netloc))
+    except Exception:
+        return url
 
 
 DEVICE_NAME_CACHE_FILE = os.path.join(
@@ -181,6 +216,9 @@ class WebServerConfig(BaseModel):
     port: int = 8088
     host: str = "0.0.0.0"
     allowed_users: list[str] = Field(default_factory=list)
+    # Host shown in Home Assistant's "Visit" link. Default: the host of the unipi_http URL (before it is mapped to
+    # 127.0.0.1). Set it when the address changes (DHCP) or HA should use a name.
+    public_host: str | None = None
 
 
 class AppConfig(BaseModel):
@@ -671,6 +709,16 @@ class UnipiBridge:
         self.config_path = config_path
         self.recorder = recorder
         self.logger = self._setup_logging()
+        # evok is on this machine: talk to it over loopback so the local rules never depend on the network.
+        self._config_url_host = urlparse(str(self.config.unipi_http.url)).hostname
+        ws_local = evok_url_to_loopback(self.config.websocket.url)
+        http_local = evok_url_to_loopback(str(self.config.unipi_http.url))
+        if ws_local != self.config.websocket.url:
+            self.logger.warning(f"evok WebSocket URL {self.config.websocket.url} is this machine: using {ws_local} (survives network loss)")
+            self.config.websocket.url = ws_local
+        if http_local != str(self.config.unipi_http.url):
+            self.logger.warning(f"evok REST URL {self.config.unipi_http.url} is this machine: using {http_local} (survives network loss)")
+            self.config.unipi_http.url = http_local
         self.circuits = CircuitRegistry(self.config, self.logger)
         # local_rules.json lives next to the config file, not in whatever CWD we were started from
         rules_path = os.path.join(os.path.dirname(os.path.abspath(config_path)), "local_rules.json")
@@ -768,6 +816,8 @@ class UnipiBridge:
         else:
             self.mqtt_client = mqtt.Client(2)  # type: ignore
 
+        # A long broker outage must not grow memory without limit: everything is republished after reconnecting.
+        self.mqtt_client.max_queued_messages_set(2000)
         self.mqtt_client.username_pw_set(
             self.config.mqtt.username, self.config.mqtt.password
         )
@@ -1085,34 +1135,39 @@ class UnipiBridge:
             self.logger.info(
                 "Async startup: Performing initial Home Assistant discovery..."
             )
-            # Now we can await directly since it's async
-            discovered_device_name = await self.perform_discovery_and_mqtt_subscribe()
-
-            if discovered_device_name:
-                self.device_name = discovered_device_name
-                self.logger.critical(f"   Device Discovered: {self.device_name}")
-                self.logger.info(
-                    f"Async startup: Discovery complete. Device Name: {self.device_name}"
-                )
-                self.initial_discovery_complete.set()
-
-                # Last-will was already moved to this topic during discovery
-                lwt_topic = self._lwt_topic_for_device()
-                self.mqtt_client.publish(lwt_topic, "online", retain=True)
-
-                # 3. Publish Discovery Config
-                # Publish Bridge Discovery (Error Sensors)
-                self.publish_bridge_discovery()
-
+            # Until discovery completes no WebSocket message is processed, i.e. every local rule is dead. So never give
+            # up: evok's REST can answer later than its WebSocket, and a bad moment must not last until a restart.
+            while not self.should_stop.is_set():
+                discovered_device_name = await self.perform_discovery_and_mqtt_subscribe()
+                if discovered_device_name:
+                    break
+                self.logger.error("Async startup: Discovery failed. Retrying in 30 s (local rules wait for it).")
+                await self._startup_retry_sleep(30)
             else:
-                self.logger.error(
-                    "Async startup: Discovery failed. Device name not found."
-                )
+                return
+
+            self.device_name = discovered_device_name
+            self.logger.critical(f"   Device Discovered: {self.device_name}")
+            self.logger.info(
+                f"Async startup: Discovery complete. Device Name: {self.device_name}"
+            )
+            self.initial_discovery_complete.set()
+
+            # Last-will was already moved to this topic during discovery
+            lwt_topic = self._lwt_topic_for_device()
+            self.mqtt_client.publish(lwt_topic, "online", retain=True)
+
+            # 3. Publish Discovery Config
+            # Publish Bridge Discovery (Error Sensors)
+            self.publish_bridge_discovery()
 
         except asyncio.CancelledError:
             self.logger.info("Async startup task cancelled.")
         except Exception as e:
             self.logger.error(f"Async startup error: {e}", exc_info=True)
+
+    async def _startup_retry_sleep(self, seconds: float) -> None:
+        await asyncio.sleep(seconds)
 
     def _web_server_enabled(self) -> bool:
         """The rule-editor web UI never runs in a shadow instance (it would fight the live one for the port)."""
@@ -1980,12 +2035,14 @@ class UnipiBridge:
         """
         self.logger.info("MQTT Monitor: Started.")
         disconnected_since: float | None = None
+        probe_again_at = 0.0
 
         while not self.should_stop.is_set():
             try:
                 await asyncio.sleep(10)
 
                 if self.mqtt_client.is_connected():
+                    probe_again_at = 0.0
                     if disconnected_since is not None:
                         self.logger.warning(
                             "MQTT Monitor: Connection restored after "
@@ -2005,15 +2062,23 @@ class UnipiBridge:
                         f"MQTT Monitor: Disconnected for {down} seconds; paho keeps retrying."
                     )
 
-                if down > MQTT_WATCHDOG_SECONDS:
-                    self.logger.critical(
-                        f"MQTT Monitor: Disconnected for over {MQTT_WATCHDOG_SECONDS} "
-                        "seconds. Exiting so systemd restarts the service."
-                    )
-                    self.exit_code = 1
-                    self.should_stop.set()
-                    self.loop.stop()
-                    break
+                if down > MQTT_WATCHDOG_SECONDS and now >= probe_again_at:
+                    if not await self._broker_reachable():
+                        # Network or broker is down: restarting would only interrupt the local rules (a restart is a
+                        # ~12 s deaf gap) without fixing anything. Look again in 5 minutes.
+                        probe_again_at = now + 300
+                        self.logger.warning(
+                            "MQTT Monitor: broker not reachable (network/broker down) - staying up, local logic keeps running."
+                        )
+                    else:
+                        self.logger.critical(
+                            f"MQTT Monitor: Disconnected for over {MQTT_WATCHDOG_SECONDS} seconds although the broker "
+                            "answers. Exiting so systemd restarts the service."
+                        )
+                        self.exit_code = 1
+                        self.should_stop.set()
+                        self.loop.stop()
+                        break
 
             except asyncio.CancelledError:
                 self.logger.info("MQTT Monitor task cancelled.")
@@ -2021,6 +2086,15 @@ class UnipiBridge:
             except Exception as e:
                 self.logger.error(f"MQTT Monitor unexpected error: {e}")
                 await asyncio.sleep(5)
+
+    async def _broker_reachable(self) -> bool:
+        """TCP connect to the broker (3 s). True = the network path works, so a stuck paho client is the problem."""
+        try:
+            _, w = await asyncio.wait_for(asyncio.open_connection(self.config.mqtt.broker, self.config.mqtt.port), timeout=3)
+            w.close()
+            return True
+        except Exception:
+            return False
 
     def _schedule_republish(self, reason: str) -> None:
         """Starts republish_all() unless one is already pending (loop thread only)."""
@@ -2370,11 +2444,28 @@ class UnipiBridge:
                 f"WS->MQTT queue full! Dropping message for topic: {message[0]}"
             )
 
+    def _lan_ip(self) -> str | None:
+        """This box's current LAN address (the one that routes to the MQTT broker). No packet is sent; None when there is no route."""
+        try:
+            fam = socket.AF_INET6 if ":" in self.config.mqtt.broker else socket.AF_INET
+            s = socket.socket(fam, socket.SOCK_DGRAM)
+            try:
+                s.connect((self.config.mqtt.broker, self.config.mqtt.port))
+                return s.getsockname()[0]
+            finally:
+                s.close()
+        except OSError:
+            return None
+
     def _build_configuration_url(self) -> str | None:
         """Builds the HA configuration_url from the unipi_http host + web port."""
         try:
             parsed_url = urlparse(str(self.config.unipi_http.url))
-            unipi_host = parsed_url.hostname or "localhost"
+            configured = self.config.web_server.public_host or self._config_url_host or parsed_url.hostname
+            if not configured or configured.lower() in _LOOPBACK_HOSTS:
+                # evok is reached over loopback: HA needs this box's current LAN address for the "Visit" link
+                configured = self._lan_ip()
+            unipi_host = configured or "localhost"
             web_port = self.config.web_server.port
             return f"http://{unipi_host}:{web_port}"
         except Exception:

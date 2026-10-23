@@ -29,6 +29,7 @@ Milestone **v2.1.0** = T03 + T04 merged (runtime code identical to v2.0.0, **rel
 * [T17 Local rules: pulse / toggle / dimmer, `when` always|ha_offline](T17-local-rule-actions.md) - medium · deps: T12 · **code done (205 tests), S103 deploy pending**
 * [T18 Shadow mode](T18-shadow-mode.md) - 🔒 · low · deps: T10 · **code done (rc7); real 1 h shadow run pending**
 * [T43 Extension watchdog (restart evok when an xS extension goes silent)](T43-extension-watchdog.md) - medium · deps: T10 · **code done (rc16), waiting for a real outage**
+* [T44 Local rules survive network/MQTT outages](T44-local-first-survivability.md) - medium · deps: T17 · **done (rc18)**
 * [T19 (optional) AO as fan/number](T19-ao-component-override.md) - 🔒 · low · deps: T11 · todo
 
 Milestone **v2.2.0** = T10–T18 merged, S103 healthy 7 days on the last rc.

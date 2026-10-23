@@ -40,6 +40,9 @@ Use this to try the bell/lamp rules without pressing the physical button. Click 
 3. The Rule activity panel shows `TEST ...` lines; HA Logbook shows the event with "TEST:" in its detail.
 4. After editing a rule without saving, ▶ Test refuses ("unsaved changes"); a brand-new rule says "not saved yet".
 
+# 1d. Local rules without network (T44, rc18) - 5 min, briefly disconnects the box
+Pass when the button still switches its output while the LAN is gone: (1) check `websocket.url` / `unipi-http.url` in `config.json` say `127.0.0.1`; (2) unplug the Ethernet cable (or disable the switch port) for a minute; (3) press the button: the output switches; the bridge log shows MQTT disconnects but **no** "WebSocket connection failed" lines; (4) plug back in: HA entities come back by themselves within ~1 minute (republish), the "Rule activity" log shows the press.
+
 # 1a. "Who switched it?" in Home Assistant (T17d, rc10) — no hardware effect
 After a rule has fired: in HA open **Settings → Devices → the Unipi device** → entity **"Rule activity"** (last event = the rule name; attributes: what was
 sent and the target), and the **Logbook** shows "Rule activity detected <rule name>" right beside the lamp's state change. If the logbook only says
