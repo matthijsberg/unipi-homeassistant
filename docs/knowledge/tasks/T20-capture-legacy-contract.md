@@ -67,4 +67,6 @@ Both concepts + `/log.md`; open questions in interface-legacy closed.
 - 2026-10-25: step 2 started - `tools/mqtt_capture.py` (read-only; 4 tests, can never publish) records `unipi/#`, `unipi1/#`, `unipi2/#` for 26 h on the M203 (test user on the HA broker). First findings in `/context/interface-legacy.md` ("Observed on the HA broker"). Still needed from Matthijs: the Home Assistant side (YAML/UI entities + automations that use these topics), what `unipi2` is, and a guided manual test session - see the chat of that day.
 
 
+- 2026-10-25 (2): step 1 partly done - Matthijs exported the complete HA MQTT YAML (sensors, binary sensors, lights, switches, fans, climates). `/context/ha-legacy-entities.md` is generated from it (Unipi entities only: 10 lights, 7 switches, 2 fans, 25 binary sensors, 23 sensors). Closed: HA sends only a ring **count** for the bell (`state: pulse`, `repeat`), no timing; the roof window is two timed outputs; HA has **no** PIR hold (the hold lives in the legacy script). Newly opened: `unipi2` is a second legacy device; who produces the `serre/vleugel_*` and `woonkamer/vleugel_*` contacts; automations/scripts/dashboards still missing.
+
 # Open questions
