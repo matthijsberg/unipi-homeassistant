@@ -38,6 +38,7 @@ from aiohttp import web
 from unipi_core.circuits import CircuitConfig, CircuitRegistry, canonicalize_circuits, normalize_dev
 from unipi_core.commands import CommandService
 from unipi_core.events import AVAILABILITY, INPUT_CHANGED, OUTPUT_CHANGED, EventBus
+from unipi_core import sysinfo
 from unipi_core.extwatch import REBOOT, RESTART_EVOK, ExtensionWatchdog, WatchdogSettings
 from unipi_core.sequencer import (
     OutputSequencer,
@@ -89,7 +90,7 @@ else:
     print("Required libraries check passed.")
 
 # --- Script Version ---
-SCRIPT_VERSION = "2.2.0-rc19"
+SCRIPT_VERSION = "2.2.0-rc20"
 
 # --- Constants ---
 # Last discovered device name, so the MQTT last-will can use the device's own
@@ -741,6 +742,7 @@ class UnipiBridge:
                              max_actions_per_day=ext.watchdog_max_actions_per_day, reboot_enabled=ext.watchdog_reboot),
             state_file=os.path.join(state_dir, "extension_watchdog_state.json"), logger=self.logger)
         self._watchdog_published: str | None = None
+        self._sysinfo: dict[str, Any] | None = None       # last collected versions (unipi_core/sysinfo.py)
         self.device_name: str = self._load_cached_device_name()
         # Topic of the last-will registered with the broker on (re)connect
         self._lwt_topic: str = ""
@@ -932,6 +934,10 @@ class UnipiBridge:
 
         # Start MQTT Monitor
         self.loop.create_task(self._mqtt_monitor(), name="MqttMonitorTask")
+
+        # Versions of OS / evok / firmware packages as diagnostic sensors (read-only, once a day)
+        if not self.shadow:
+            self.loop.create_task(self._system_info_loop(), name="SystemInfoTask")
 
         # Pulse counters: REST safety net next to the WebSocket pushes (only if any counter is configured)
         if any(c.counter for c in self.config.circuits.values()):
@@ -1542,6 +1548,7 @@ class UnipiBridge:
                         "/vad",
                         "/vis",
                         "/extension_watchdog/attributes",
+                        "/system/updates/attributes",
                     )
                 )
                 self.mqtt_client.publish(topic, value, qos=1, retain=should_retain)
@@ -2138,6 +2145,7 @@ class UnipiBridge:
             # publish_discovery_config() appends the command topics again
             self.mqtt_subscribe_topics = list(dict.fromkeys(self.mqtt_subscribe_topics))
             self.publish_bridge_discovery()
+            self._publish_system_info()
 
             ws = self.websocket_connection
             if ws is not None and ws.state == State.OPEN:
@@ -2307,6 +2315,55 @@ class UnipiBridge:
         self._enqueue_ws_to_mqtt((f"{self.config.mqtt.discovery_prefix}/sensor/{self.device_name}_ext_watchdog/config", json.dumps(cfg)))
         self._watchdog_published = None      # (re)publish the current state after the config
 
+    # ---- software versions as diagnostic sensors (T45) -------------------------------------------------------------------
+    def _system_topic(self, key: str, leaf: str = "state") -> str:
+        return f"{self.config.mqtt.topic}/{self.device_name}_bridge/system/{key}/{leaf}"
+
+    async def _system_info_loop(self) -> None:
+        """Collect versions shortly after start and then daily; the commands run in a worker thread (never block the loop)."""
+        try:
+            await asyncio.sleep(20)                       # discovery (device name) comes first
+            while not self.should_stop.is_set():
+                try:
+                    self._sysinfo = await self.loop.run_in_executor(None, sysinfo.collect, SCRIPT_VERSION)
+                    self._publish_system_info()
+                except Exception as e:
+                    self.logger.warning(f"System info: could not collect versions: {e}")
+                await asyncio.sleep(86400)
+        except asyncio.CancelledError:
+            pass
+
+    def _publish_system_info(self) -> None:
+        if not self.device_name or self.shadow or not self._sysinfo:
+            return
+        info = self._sysinfo
+        for key in sysinfo.ITEMS:
+            if info.get(key) not in (None, ""):
+                self._enqueue_ws_to_mqtt((self._system_topic(key), str(info[key])))
+        ups = info.get("updates")
+        if ups is not None:
+            attrs = sysinfo.updates_attributes(info)
+            self._enqueue_ws_to_mqtt((self._system_topic("updates"), str(len(ups))))
+            self._enqueue_ws_to_mqtt((self._system_topic("firmware_updates"), str(sysinfo.firmware_update_count(info))))
+            self._enqueue_ws_to_mqtt((self._system_topic("updates", "attributes"), json.dumps(attrs)))
+
+    def _publish_system_info_discovery(self) -> None:
+        if not self.device_name or self.shadow:
+            return
+        root = self.config.mqtt.topic
+        dev = {"identifiers": [f"{self.device_name}_bridge"], "name": f"Unipi {self.device_name} Bridge",
+               "manufacturer": "Unipi Technology s.r.o.", "model": "MQTT Bridge", "sw_version": SCRIPT_VERSION}
+        common = {"dev": dev, "entity_category": "diagnostic",
+                  "origin": {"name": "Unipi - HomeAssistant", "sw": SCRIPT_VERSION, "url": "https://github.com/matthijsberg/unipi-homeassistant"},
+                  "availability_topic": f"{root}/{self.device_name}/status", "payload_available": "online", "payload_not_available": "offline"}
+        entries = [(k, name, icon, {}) for k, (name, icon) in sysinfo.ITEMS.items()]
+        entries += [("updates", "Updates available", "mdi:package-up", {"json_attributes_topic": self._system_topic("updates", "attributes")}),
+                    ("firmware_updates", "Firmware updates available", "mdi:memory", {"json_attributes_topic": self._system_topic("updates", "attributes")})]
+        for key, name, icon, extra in entries:
+            cfg = {**common, **extra, "name": name, "unique_id": f"{self.device_name}_sys_{key}", "icon": icon,
+                   "state_topic": self._system_topic(key)}
+            self._enqueue_ws_to_mqtt((f"{self.config.mqtt.discovery_prefix}/sensor/{self.device_name}_sys_{key}/config", json.dumps(cfg)))
+
     @log_function
     def publish_bridge_discovery(self) -> None:
         """
@@ -2320,6 +2377,7 @@ class UnipiBridge:
 
         self.logger.info(f"Publishing Bridge Discovery for device: {self.device_name}")
         self._publish_watchdog_discovery()
+        self._publish_system_info_discovery()
         discovery_prefix = self.config.mqtt.discovery_prefix
         root_topic = self.config.mqtt.topic
         device_topic = f"{root_topic}/{self.device_name}_bridge"

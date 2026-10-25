@@ -86,6 +86,10 @@ Digital-input values are logical from the WS edge on: `device_states`, rules and
 
 `check_config()` / `--check-config` and `_state_dir()` (`UNIPI_HA_STATE_DIR`) in `hass-unipi.py`; `tools/{bootstrap.sh,lib-release.sh,deploy-release.sh,site_bundle.py}`, `systemd/hass-unipi.service`.
 
+# system versions (T45)
+
+`unipi_core/sysinfo.py` (`collect`, `parse_upgradable`, `updates_attributes`); bridge: `_system_info_loop`, `_publish_system_info(_discovery)`; `bootstrap.sh step_upgrade`.
+
 # Tooling (T03)
 
 `tools/{backup.sh,deploy.sh,rollback.sh,healthcheck.py}` — see `tools/README.md`. Deploy = preflight → backup →

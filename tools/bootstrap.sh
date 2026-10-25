@@ -17,6 +17,12 @@
 #   --repo-url URL         clone source when this script is not inside a git checkout
 #   --unipi-script-url URL Unipi's repo script (default: https://repo.unipi.technology/debian/raspberry-neuron.sh)
 #   --user NAME            service user (default unipi)
+#   --upgrade-system       also run `apt-get full-upgrade` (OS, kernel, Raspberry Pi firmware); exit 10 if a reboot is needed.
+#                          A new `unipi-firmware6` package does NOT flash the controller boards (Unipi's package says so):
+#                          that stays a deliberate step, `sudo /opt/unipi/tools/fwspi --auto -v` + reboot (see the runbook).
+#   --auto-security-updates  install Debian SECURITY updates automatically (unattended-upgrades, never reboots by itself,
+#                          Unipi/Raspberry Pi repositories are not included). --no-auto-security-updates = leave as is.
+#                          Without either flag and without --yes the bootstrap asks when it runs on a terminal.
 # Exit codes: 0 ok | 1 failed | 2 usage/preflight | 3 network | 10 reboot required, then run me again.
 # Every step checks the real situation first ("check-then-act"); a second run changes nothing.
 set -euo pipefail
@@ -26,6 +32,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$HERE/lib-release.sh"
 
 SITE=""; TAG=""; DRY=0; YES=0; SKIP_EVOK=0; PREFIX=""; WHEEL=""; HOSTNAME_NEW=""; AUTH_KEY=""; HARDEN=0; KEY_VERIFIED=0
+UPGRADE=0; AUTOUPD=""
 SRC=""; REPO_URL="https://github.com/matthijsberg/unipi-homeassistant.git"
 UNIPI_SCRIPT_URL="https://repo.unipi.technology/debian/raspberry-neuron.sh"; SVC_USER="unipi"
 while [ $# -gt 0 ]; do
@@ -34,7 +41,7 @@ while [ $# -gt 0 ]; do
     --prefix) PREFIX="${2%/}"; shift;; --wheelhouse) WHEEL="$2"; shift;; --hostname) HOSTNAME_NEW="$2"; shift;;
     --authorized-key) AUTH_KEY="$2"; shift;; --harden-ssh) HARDEN=1;; --key-login-verified) KEY_VERIFIED=1;;
     --source-repo) SRC="$2"; shift;; --repo-url) REPO_URL="$2"; shift;; --unipi-script-url) UNIPI_SCRIPT_URL="$2"; shift;;
-    --user) SVC_USER="$2"; shift;; -h|--help) sed -n '2,24p' "$0"; exit 0;;
+    --user) SVC_USER="$2"; shift;; --upgrade-system) UPGRADE=1;; --auto-security-updates) AUTOUPD=on;; --no-auto-security-updates) AUTOUPD=off;; -h|--help) sed -n '2,24p' "$0"; exit 0;;
     *) echo "unknown option $1 (see --help)" >&2; exit 2;;
   esac; shift
 done
@@ -115,6 +122,71 @@ step_apt() {
     changed "installed packages: ${missing[*]}"
   fi
   DONE+=(apt)
+}
+
+# Optional: bring the OS up to date. The Unipi board firmware is a separate, deliberate step (fwspi).
+step_upgrade() {
+  [ "$UPGRADE" = 1 ] || return 0
+  say "step 2b/8 system upgrade (--upgrade-system)"
+  [ "$LIVE" = 1 ] || { say "  (prefix mode: skipped)"; return 0; }
+  if [ "$DRY" = 1 ]; then
+    echo "  WOULD: apt-get update && apt-get -y full-upgrade   (the Unipi controller boards are not flashed by this)"; return 0
+  fi
+  local watch=('raspi-firmware' 'unipi-kernel*' 'linux-image-*' 'unipi-firmware6') before after fw_before fw_after
+  before="$(dpkg-query -W -f='${Package} ${Version}\n' "${watch[@]}" 2>/dev/null | sort)"
+  apt-get update -q >/dev/null
+  local rc=0
+  DEBIAN_FRONTEND=noninteractive apt-get -y -q -o Dpkg::Options::=--force-confold full-upgrade || rc=$?
+  [ "$rc" = 0 ] || die "apt-get full-upgrade failed (exit $rc)" 1
+  after="$(dpkg-query -W -f='${Package} ${Version}\n' "${watch[@]}" 2>/dev/null | sort)"
+  changed "system packages upgraded"
+  fw_before="$(grep '^unipi-firmware6 ' <<<"$before")"; fw_after="$(grep '^unipi-firmware6 ' <<<"$after")"
+  if [ "$fw_before" != "$fw_after" ]; then
+    say "  NOTE: ${fw_after:-unipi-firmware6} is installed but the controller boards still run their old firmware."
+    say "        Flash them deliberately (never interrupt the power):  sudo /opt/unipi/tools/fwspi --auto -v   then reboot."
+  fi
+  if [ "$before" != "$after" ] || [ -f /var/run/reboot-required ]; then
+    DONE+=(apt upgrade); persist_state; say "REBOOT REQUIRED (kernel / Raspberry Pi firmware / firmware package changed): reboot, then run this command again."; exit 10
+  fi
+  DONE+=(upgrade)
+}
+
+# Optional: Debian security updates without a person. Never reboots, and only the Debian-Security origin: the Unipi and
+# Raspberry Pi repositories (kernel, evok, firmware) change only when somebody decides so.
+AUTOUPD_FILE_NAME=52unipi-auto-security
+autoupd_conf() {
+  cat <<'CONF'
+// Managed by the Unipi bridge bootstrap (--auto-security-updates). Delete this file to switch it off.
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
+#clear Unattended-Upgrade::Origins-Pattern;
+Unattended-Upgrade::Origins-Pattern {
+    "origin=Debian,codename=${distro_codename}-security,label=Debian-Security";
+    "origin=Debian,codename=${distro_codename},label=Debian-Security";
+};
+Unattended-Upgrade::Automatic-Reboot "false";
+Unattended-Upgrade::Remove-Unused-Dependencies "false";
+CONF
+}
+
+step_autoupdates() {
+  if [ -z "$AUTOUPD" ] && [ "$YES" = 0 ] && [ "$LIVE" = 1 ] && [ "$DRY" = 0 ] && [ -t 0 ]; then
+    local a; read -r -p "  Install Debian SECURITY updates automatically (never reboots by itself)? [y/N] " a
+    [ "$a" = y ] && AUTOUPD=on || AUTOUPD=off
+  fi
+  [ "$AUTOUPD" = on ] || return 0                       # off / undecided: change nothing, never switch an existing setup off
+  say "automatic security updates"
+  [ "$LIVE" = 1 ] || { say "  (prefix mode: skipped)"; return 0; }
+  local dir="${UNIPI_APT_CONF_DIR:-/etc/apt/apt.conf.d}" f want
+  f="$dir/$AUTOUPD_FILE_NAME"; want="$(autoupd_conf)"
+  if [ "$DRY" = 1 ]; then echo "  WOULD: install unattended-upgrades (if missing) and write $f (Debian-Security only, no automatic reboot)"; return 0; fi
+  if ! dpkg -s unattended-upgrades >/dev/null 2>&1; then
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -q unattended-upgrades >/dev/null; changed "installed unattended-upgrades"
+  fi
+  if [ "$(cat "$f" 2>/dev/null)" != "$want" ]; then
+    printf '%s\n' "$want" > "$f"; chmod 644 "$f"; changed "automatic security updates enabled ($f)"
+  fi
+  DONE+=(autoupdates)
 }
 
 # Checks that need a complete python: the site bundle must be intact BEFORE anything is changed beyond packages.
@@ -320,6 +392,8 @@ summary() {
   fi
 }
 
-step_preflight; step_apt; step_checks; step_evok; step_release; step_site; step_sudoers; step_service; step_extras
-persist_state
-summary
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then      # not when sourced (tests call single steps)
+  step_preflight; step_apt; step_upgrade; step_autoupdates; step_checks; step_evok; step_release; step_site; step_sudoers; step_service; step_extras
+  persist_state
+  summary
+fi

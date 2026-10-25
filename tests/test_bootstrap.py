@@ -357,3 +357,103 @@ def test_a_restart_that_cannot_be_issued_flips_back_instead_of_leaving_a_half_de
     r = sh([str(box["src"] / "tools" / "deploy.sh"), "v2"], env=env, check=False)
     assert r.returncode == 1 and "FAILED" in r.stdout and "flipping back to" in r.stdout
     assert current(box) == "releases/v1"                                                       # not left on v2
+
+
+# ---- --upgrade-system and --auto-security-updates ------------------------------------------------------------------------------------
+@pytest.fixture
+def apt_box(tmp_path):
+    """Fake apt-get/dpkg-query/apt-config on PATH so the real step functions run without root."""
+    fake = tmp_path / "fakebin"; fake.mkdir()
+    log, vers = tmp_path / "calls.log", tmp_path / "versions"
+    vers.write_text("raspi-firmware 1.1\nunipi-kernel 5\nunipi-firmware6 7.20\n")
+    (fake / "apt-get").write_text(f'#!/usr/bin/env bash\necho "apt-get $*" >> {log}\n'
+        f'case "$*" in *full-upgrade*) [ -n "$FAIL_UPGRADE" ] && exit 100; [ -n "$CHANGE_KERNEL" ] && echo "unipi-kernel 6" >> {vers}; '
+        f'[ -n "$NEW_FIRMWARE" ] && sed -i "s/unipi-firmware6 7.20/unipi-firmware6 7.22/" {vers};; esac\nexit 0\n')
+    (fake / "apt-mark").write_text(f'#!/usr/bin/env bash\necho "apt-mark $*" >> {log}\n')
+    (fake / "dpkg-query").write_text(f"#!/usr/bin/env bash\ncat {vers}\n")
+    (fake / "dpkg").write_text(f'#!/usr/bin/env bash\n[ "$1" = "-s" ] && [ -n "$HAVE_UNATTENDED" ] && exit 0; [ "$1" = "-s" ] && exit 1; exit 0\n')
+    for f in fake.iterdir():
+        f.chmod(0o755)
+    conf = tmp_path / "apt.conf.d"; conf.mkdir()
+    return {"fake": fake, "log": log, "tmp": tmp_path, "conf": conf}
+
+
+def run_step(box, step, *, dry=False, vars="", extra_env=None):
+    state = box["tmp"] / "state"; state.mkdir(exist_ok=True)
+    script = (f'set --; . {TOOLS}/bootstrap.sh; LIVE=1; DRY={1 if dry else 0}; VAR={state}; STATE={state}/.bootstrap-state; TAG=t; {vars}; {step}; echo STEP_DONE')
+    env = {"PATH": f"{box['fake']}:{os.environ['PATH']}", "UNIPI_APT_CONF_DIR": str(box["conf"]), **(extra_env or {})}
+    return sh(["bash", "-c", script], env=env, check=False)
+
+
+def calls(box):
+    return box["log"].read_text() if box["log"].exists() else ""
+
+
+def test_upgrade_system_upgrades_and_never_holds_or_flashes_anything(apt_box):
+    r = run_step(apt_box, "step_upgrade", vars="UPGRADE=1")
+    assert r.returncode == 0 and "STEP_DONE" in r.stdout and "full-upgrade" in calls(apt_box)
+    assert "apt-mark" not in calls(apt_box) and "fwspi" not in calls(apt_box)
+
+
+def test_upgrade_is_off_unless_asked(apt_box):
+    r = run_step(apt_box, "step_upgrade", vars="UPGRADE=0")
+    assert r.returncode == 0 and calls(apt_box) == ""
+
+
+def test_a_new_firmware_package_prints_the_manual_flash_command(apt_box):
+    r = run_step(apt_box, "step_upgrade", vars="UPGRADE=1", extra_env={"NEW_FIRMWARE": "1"})
+    assert r.returncode == 10                                                                      # the package changed -> reboot step
+    assert "controller boards still run their old firmware" in r.stdout and "fwspi --auto -v" in r.stdout
+
+
+def test_a_kernel_or_pi_firmware_change_asks_for_a_reboot_with_exit_10(apt_box):
+    r = run_step(apt_box, "step_upgrade", vars="UPGRADE=1", extra_env={"CHANGE_KERNEL": "1"})
+    assert r.returncode == 10 and "REBOOT REQUIRED" in r.stdout and "STEP_DONE" not in r.stdout
+    assert "release=t" in (apt_box["tmp"] / "state" / ".bootstrap-state").read_text()
+
+
+def test_a_failed_upgrade_stops_the_bootstrap(apt_box):
+    r = run_step(apt_box, "step_upgrade", vars="UPGRADE=1", extra_env={"FAIL_UPGRADE": "1"})
+    assert r.returncode == 1 and "full-upgrade failed" in r.stderr
+
+
+def test_upgrade_dry_run_runs_no_apt_get(apt_box):
+    r = run_step(apt_box, "step_upgrade", dry=True, vars="UPGRADE=1")
+    assert r.returncode == 0 and "WOULD: apt-get update && apt-get -y full-upgrade" in r.stdout and calls(apt_box) == ""
+
+
+def test_auto_security_updates_installs_the_package_and_writes_a_security_only_config(apt_box):
+    r = run_step(apt_box, "step_autoupdates", vars="AUTOUPD=on")
+    assert r.returncode == 0 and "install -y -q unattended-upgrades" in calls(apt_box)
+    conf = (apt_box["conf"] / "52unipi-auto-security").read_text()
+    assert 'APT::Periodic::Unattended-Upgrade "1";' in conf and "#clear Unattended-Upgrade::Origins-Pattern;" in conf
+    assert "label=Debian-Security" in conf and "label=Debian\"" not in conf.replace("label=Debian-Security", "")   # no general 'updates' origin
+    rules = "\n".join(l for l in conf.splitlines() if not l.startswith("//"))                       # (ignore the explanatory comment)
+    assert "Unipi" not in rules and "Raspberry" not in rules and "raspi" not in rules.lower()        # board/kernel/evok repos are never automatic
+    assert 'Automatic-Reboot "false"' in conf                                                       # never reboots a house controller by itself
+
+
+def test_auto_security_updates_is_idempotent_and_skips_an_installed_package(apt_box):
+    run_step(apt_box, "step_autoupdates", vars="AUTOUPD=on", extra_env={"HAVE_UNATTENDED": "1"})
+    snap = (apt_box["conf"] / "52unipi-auto-security").stat().st_mtime_ns
+    apt_box["log"].unlink(missing_ok=True)
+    r = run_step(apt_box, "step_autoupdates", vars="AUTOUPD=on", extra_env={"HAVE_UNATTENDED": "1"})
+    assert r.returncode == 0 and calls(apt_box) == "" and (apt_box["conf"] / "52unipi-auto-security").stat().st_mtime_ns == snap
+
+
+def test_undecided_or_off_changes_nothing_and_never_switches_an_existing_setup_off(apt_box):
+    (apt_box["conf"] / "52unipi-auto-security").write_text("existing")
+    for v in ("AUTOUPD=''", "AUTOUPD=off"):
+        r = run_step(apt_box, "step_autoupdates", vars=v)                                           # YES=0 but stdin is not a terminal here
+        assert r.returncode == 0 and calls(apt_box) == ""
+    assert (apt_box["conf"] / "52unipi-auto-security").read_text() == "existing"
+
+
+def test_auto_security_updates_dry_run_writes_nothing(apt_box):
+    r = run_step(apt_box, "step_autoupdates", dry=True, vars="AUTOUPD=on")
+    assert r.returncode == 0 and "WOULD: install unattended-upgrades" in r.stdout and not list(apt_box["conf"].iterdir())
+
+
+def test_the_question_is_only_asked_on_a_terminal_without_flags_or_yes():
+    text = (TOOLS / "bootstrap.sh").read_text()
+    assert '[ -z "$AUTOUPD" ] && [ "$YES" = 0 ] && [ "$LIVE" = 1 ] && [ "$DRY" = 0 ] && [ -t 0 ]' in text
