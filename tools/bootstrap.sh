@@ -264,8 +264,11 @@ step_service() {
 # BaseOS asks for a password on every sudo, so allow exactly these commands without one.
 step_sudoers() {
   [ "$LIVE" = 1 ] || return 0
-  local f=/etc/sudoers.d/hass-unipi sc; sc="$(command -v systemctl)"
+  # The LAST matching sudoers rule wins and files in sudoers.d are read in name order; BaseOS ships a later "unipi" file
+  # that demands a password for everything, so ours must sort after it ("zz-").
+  local f=/etc/sudoers.d/zz-hass-unipi sc; sc="$(command -v systemctl)"
   local want; want="$(printf '%s ALL=(root) NOPASSWD: %s restart hass-unipi, %s restart evok\n' "$SVC_USER" "$sc" "$sc")"
+  [ "$DRY" = 1 ] || rm -f /etc/sudoers.d/hass-unipi          # earlier name (sorted too early to ever apply)
   if [ "$(cat "$f" 2>/dev/null)" = "$want" ]; then return 0; fi
   if [ "$DRY" = 1 ]; then echo "  WOULD: allow $SVC_USER to run '$sc restart hass-unipi|evok' without a password ($f)"; return 0; fi
   local tmp; tmp="$(mktemp)"; printf '%s\n' "$want" > "$tmp"
@@ -317,6 +320,6 @@ summary() {
   fi
 }
 
-step_preflight; step_apt; step_checks; step_evok; step_release; step_site; step_service; step_sudoers; step_extras
+step_preflight; step_apt; step_checks; step_evok; step_release; step_site; step_sudoers; step_service; step_extras
 persist_state
 summary
