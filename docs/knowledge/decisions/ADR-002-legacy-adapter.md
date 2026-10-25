@@ -7,6 +7,8 @@ status: draft
 generated: { by: claude-code/claude-opus-5-5, at: 2026-10-07T09:30:00Z }
 ---
 
+> **SUPERSEDED 2026-10-25 (Matthijs):** the adapter is not built (T21 dropped). Home Assistant is migrated directly; PIR hold, lux scaling, water in litres etc. become Home Assistant's job (ADR-005 direction), local logic = local rules. See T22 and the L513 migration map.
+
 # Context
 Home Assistant drives the L513 through hand-written YAML on `unipi1/…` and `unipi/<area>/…`
 topics. Matthijs asked for an adapter "that runs the old logic in a separate script file, so

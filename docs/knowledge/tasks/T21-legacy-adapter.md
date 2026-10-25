@@ -4,7 +4,7 @@ id: T21
 title: "Implement legacy_adapter.py behind the legacy.enabled switch"
 description: "With legacy.enabled true the bridge serves every legacy topic in the verified contract via core commands/events; with false the module is never imported."
 phase: 2
-task_status: todo
+task_status: dropped
 depends_on: [T12, T15, T17, T20]
 risk: high
 human_gate: false
@@ -19,6 +19,8 @@ PIR hold (`device_delay`) and lux scaling now live in Home Assistant, so the ada
 and `{"lux": n}` topics by translation alone. Either (a) migrate those HA entities to the discovered ones **before** the L513
 cutover, or (b) let the adapter implement hold/scale itself (breaks "translation-only", but is deleted with the adapter in T42).
 **🔒 HUMAN decision before T21 starts.**
+
+> **DROPPED 2026-10-25 (Matthijs):** no legacy adapter. Home Assistant is switched to the new discovered entities/topics directly (he fixes the entity names himself from the old->new map), the L513's local logic (doorbells, light switches) becomes local rules, and everything else is rebuilt as HA automations. The functions the old script performed that now belong to HA are listed in the generated L513 migration map (see T22). Kept below for history.
 
 # Objective
 Implements ADR-002: old HA YAML keeps working on the upgraded L513, while all behaviour runs
