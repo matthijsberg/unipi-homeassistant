@@ -42,3 +42,4 @@ description: "The project's long-term memory (the \"Elephant\"): context, contra
 # Conventions
 
 * [Task card template](conventions/task-card-template.md) - for new tasks
+- [Home Assistant side of the legacy contract](context/ha-legacy-entities.md) - every HA entity on the unipi/unipi1/unipi2 topics, payloads, templates, defaults (T20)
