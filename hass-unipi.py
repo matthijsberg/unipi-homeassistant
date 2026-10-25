@@ -80,16 +80,16 @@ else:
     # should catch it)
     try:
         import pam  # type: ignore[import]
-    except ImportError:
+    except ImportError as _pam_err:
         pam = None
         print(
-            "WARNING: 'python-pam' library not found. Authentication features will be disabled."
+            f"WARNING: PAM login is unavailable ({_pam_err}). The web UI cannot log anyone in."
         )
 
     print("Required libraries check passed.")
 
 # --- Script Version ---
-SCRIPT_VERSION = "2.2.0-rc18"
+SCRIPT_VERSION = "2.2.0-rc19"
 
 # --- Constants ---
 # Last discovered device name, so the MQTT last-will can use the device's own

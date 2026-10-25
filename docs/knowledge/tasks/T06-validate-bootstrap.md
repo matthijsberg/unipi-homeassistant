@@ -4,7 +4,7 @@ id: T06
 title: "Validate the bootstrap in a clean arm64 Debian 12 container before the L513 window"
 description: "bootstrap.sh (without Evok/hardware) succeeds from scratch in a clean arm64 Debian 12 environment, is idempotent, and its site-bundle round trip and release rollback work; remaining unknowns about the real BaseOS image are listed."
 phase: 0
-task_status: todo
+task_status: done
 depends_on: [T05]
 risk: low
 human_gate: true
@@ -57,5 +57,11 @@ Nothing live was touched.
 Runbook draft, inventory (image facts), `/log.md`, tasks index.
 
 # Evidence
+**Done on a real Unipi M203 with a fresh BaseOS image (Debian 13, kernel 6.12.109), 2026-10-25** - better than the planned container (see `/context/hardware-inventory.md` for the image facts). Isolated test setup: local mosquitto on the M203, site bundle with `127.0.0.1` URLs (nothing touched the house broker or HA).
+- Run 1 (`bootstrap.sh --site ... --tag v2.2.0-rc18 --yes`): apt prerequisites, evok 3.0.6.3 installed from Unipi's repo, release unpacked, venv built (Python 3.13, wheels for pydantic/aiohttp installed fine), config imported and checked, service started - then **failed at the health check**. Four more bootstrap/deploy bugs and one dependency bug were found and fixed one by one (below); runs 2-5 converged.
+- Final state: **second/third/fourth run = "changes: none (already up to date)"**, `.bootstrap-state` stable; `deploy.sh v2.2.0-rc17` -> flip + restart + fresh health check OK; `rollback.sh previous` -> back on rc18, OK; one shared venv for both releases; bridge `online`, device `Neuron_M203_154`, extension watchdog `no_extension` (correct: no extension), **LED pulse 3x via MQTT works** on the real hardware.
+- Bugs found only by the real image (all fixed, tests added): (1) `python3-minimal` has no `http`/`shutil`/`tarfile`/`venv`: the preflight and the site bundle crashed before any package was installed -> full python installed first, connectivity checked in plain bash, dry run copes with the incomplete python; (2) the health check read `.device_name` at once, but a first start writes it ~15 s later -> it waits; (3) `--fresh` demanded new publishes from a service that was not restarted -> fresh only after a (re)start, and the bootstrap restarts when release/config/unit changed; (4) BaseOS asks a password for every sudo and its `sudoers.d/unipi` is read after ours (last match wins) -> narrow NOPASSWD rule for `systemctl restart hass-unipi|evok` in `zz-hass-unipi`; before that, a refused `sudo -n systemctl restart` aborted `deploy.sh` AFTER the flip and left `current` on the new release while the old code ran -> now the same flip-back as an unhealthy release; (5) `python-pam` imports `six` without declaring it: web login was HTTP 500 on a fresh venv -> `six==1.17.0` in requirements.txt (+ the warning now names the real import error).
+- Still unverified (needs the real L513 card): the xS30 extension and its evok config, 1-wire sensors specific to the L513, evok config from the L513 site bundle, kernel reboot behaviour of a first-time Unipi repo setup (not needed on this image: the repo and kernel were already in place).
+
 
 # Open questions

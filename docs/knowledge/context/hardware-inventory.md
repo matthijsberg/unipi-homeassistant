@@ -87,3 +87,11 @@ Reference (S103, working): Unipi apt repo + `unipi-os-configurator`, kernel/firm
 - Exact Unipi OS / evok version on L513 → **T30/T31** (no login before the upgrade); storage medium = removable µSD per Matthijs, confirm physically → **T30**.
 - Whether the 11 retained topics not in the config (e.g. `serre/vleugel_tuin`, `bijkeuken/lekkage-koelkast`) are stale — T01 says very likely yes; confirm in **T20**.
 - What the HA YAML for the old entities looks like → **T20**.
+
+# Test machine: Unipi Neuron M203 (sn 154), IP not recorded (DHCP) - added 2026-10-25
+Fresh **BaseOS** image: product line Unipi Neuron, release Stable, version **13.20261007.0**, build 7 Oct 2026, **Debian 13 (trixie)**, 64-bit, kernel **6.12.109-v8**. Used for T06 (bootstrap validation). Facts found on the real image:
+- **Python 3.13.5, and only `python3-minimal`** (no `http`, `shutil`, `tarfile`, `venv` ...); `git`, `python3-venv`, `python3-pip` not installed; apt package lists empty until the first `apt-get update`.
+- The Unipi apt repo is **already configured** (`/etc/apt/sources.list.d/unipi.sources`, `unipi-mod.sources`, suite `trixie`, components `main neuron-main`); Unipi kernel/firmware/os-configurator packages are installed; **evok is not installed**, candidate `evok 3.0.6.3~trixie` (evok-web 3.18.0) after `apt-get update`. No need to run `raspberry-neuron.sh` on this image.
+- User `unipi` (groups dialout, sudo, gpio, spi, i2c). **sudo asks for a password** (`/etc/sudoers.d/unipi`, read AFTER any file sorting before it). SSH password login works; the password is set by a file on the boot partition before first boot (`/boot/firmware/PWD_HASH_USER` is the hashed result). Credentials are never recorded in this repository.
+- Onboard I/O present (di, led, ro, ao ...); 1-wire temperature sensors detected; no extension.
+
