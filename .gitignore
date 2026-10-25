@@ -40,3 +40,8 @@ site-*.tgz
 # site bundles hold passwords: never in git
 *.site.tgz
 site-*.tgz
+
+# MQTT recordings contain household behaviour: never in git
+capture*.jsonl
+*_traffic*.jsonl
+!tests/fixtures/legacy_traffic.jsonl
