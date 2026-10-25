@@ -48,7 +48,6 @@ site="$BACKUPS/$(date -u +%Y%m%dT%H%M%SZ)-pre-$tag.site.tgz"
 python3 "$HERE/site_bundle.py" export --prefix "${PREFIX:-/}" --out "$site" >/dev/null && log "site files saved: $site" || log "WARNING: could not save the site files"
 
 # --- switch ------------------------------------------------------------------------------------------
-restarts_before="$("${SYSTEMCTL[@]}" show "$SERVICE" -pNRestarts 2>/dev/null | sed -n 's/^NRestarts=//p' || true)"
 release_flip "$OPT" "$tag" >/dev/null; log "current -> $tag (was $prev)"
 log "restarting $SERVICE"; "${SYSTEMCTL[@]}" restart "$SERVICE"
 if healthy "$new_version"; then

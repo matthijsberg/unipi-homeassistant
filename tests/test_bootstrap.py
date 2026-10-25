@@ -4,6 +4,7 @@ import json
 import os
 import stat
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -310,3 +311,35 @@ def test_prune_never_removes_current_or_previous_even_when_they_are_old(tmp_path
     sh(["bash", "-c", f'. {TOOLS}/lib-release.sh; release_prune {opt} 3'])
     assert sorted(p.name for p in (opt / "releases").iterdir()) == ["r1", "r2", "r6", "r7", "r8"]
     assert sorted(p.name for p in (opt / "venvs").iterdir()) == ["used"]                    # the unused venv is removed, the linked one stays
+
+
+# ---- found on the real BaseOS image (Debian 13, python3-minimal only) --------------------------------------------------------
+def test_dry_run_on_an_image_with_only_python3_minimal_plans_the_package_step(src, site, tmp_path):
+    """BaseOS ships python3-minimal: no http/tarfile/venv. The bootstrap must plan to install python3 BEFORE using it."""
+    fake = tmp_path / "fakebin"; fake.mkdir()
+    real = sh(["which", "python3"]).stdout.strip()
+    (fake / "python3").write_text(f'#!/usr/bin/env bash\ncase "$*" in *"import http.client"*) exit 1;; esac\nexec {real} "$@"\n')
+    (fake / "dpkg").write_text('#!/usr/bin/env bash\n[ "$1" = "-s" ] && case "$2" in python3|python3-venv|python3-pip) exit 1;; esac\nexit 0\n')
+    (fake / "systemctl").write_text("#!/usr/bin/env bash\nexit 0\n")
+    for f in fake.iterdir():
+        f.chmod(0o755)
+    env = {"PATH": f"{fake}:{os.environ['PATH']}", "UNIPI_SKIP_NET_CHECK": "1"}
+    r = sh([str(src / "tools" / "bootstrap.sh"), "--dry-run", "--yes", "--skip-evok", "--source-repo", str(src), "--site", str(site)], env=env, check=False)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "WOULD: apt-get update && apt-get install -y python3 python3-venv python3-pip" in r.stdout
+    assert "site bundle not verified" in r.stdout                                              # did not crash on the missing stdlib
+    assert "WOULD: allow unipi to run" in r.stdout and "restart hass-unipi|evok" in r.stdout    # sudo rule for the service user
+
+
+def test_healthcheck_waits_for_the_device_name_of_a_first_install(tmp_path):
+    """First start of a fresh box: .device_name appears ~10-20 s after the service starts; the check must wait for it."""
+    import threading, time as _t
+    cfg = tmp_path / "config.json"; cfg.write_text(json.dumps({"mqtt": {"broker": "127.0.0.1", "port": 1}}))   # nothing listens on port 1
+    (tmp_path / "hass-unipi.py").write_text('SCRIPT_VERSION = "9.9.9"\n')
+    cmd = [sys.executable, str(TOOLS / "healthcheck.py"), "--skip-systemd", "--config", str(cfg), "--state-dir", str(tmp_path), "--runtime", str(tmp_path), "--timeout", "8"]
+    t0 = _t.time(); r = sh(cmd, check=False)
+    assert r.returncode == 2 and "cannot evaluate" in r.stderr and "device_name" in r.stderr and _t.time() - t0 >= 7      # waited the whole time
+    threading.Timer(2.5, lambda: (tmp_path / ".device_name").write_text("Neuron_TEST_1")).start()
+    t0 = _t.time(); r = sh(cmd, check=False)
+    assert r.returncode == 2 and "cannot reach MQTT broker" in r.stderr                       # got past the name: it WAS picked up
+    assert 2 <= _t.time() - t0 < 7
