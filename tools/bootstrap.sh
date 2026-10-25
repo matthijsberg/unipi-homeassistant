@@ -43,7 +43,7 @@ LIVE=1; [ -n "$PREFIX" ] && LIVE=0
 OPT="$PREFIX/opt/unipi-ha"; ETC="$PREFIX/etc/unipi-ha"; VAR="$PREFIX/var/lib/unipi-ha"
 EVOK_CFG="$PREFIX/etc/evok/config.yaml"; UNIT_DST="$PREFIX/etc/systemd/system/hass-unipi.service"
 STATE="$VAR/.bootstrap-state"
-CHANGED=(); DONE=()
+CHANGED=(); DONE=(); NEED_RESTART=0; STARTED_NOW=0
 
 say()  { echo "[bootstrap] $*"; }
 warn() { echo "[bootstrap] WARNING: $*" >&2; }
@@ -58,23 +58,21 @@ owner() { [ "$LIVE" = 1 ] && [ "$DRY" = 0 ] && chown "$SVC_USER:$SVC_USER" "$@" 
 step_preflight() {
   say "step 1/8 preflight"
   if [ "$LIVE" = 1 ] && [ "$(id -u)" != 0 ] && [ "$DRY" = 0 ]; then die "run as root (sudo), or use --dry-run / --prefix" 2; fi
-  command -v python3 >/dev/null || die "python3 is required" 2
   if [ -r /etc/os-release ]; then
-    . /etc/os-release; { [ "${ID:-}" = debian ] && [ "${VERSION_ID:-}" = 12 ]; } || warn "expected Debian 12, found ${PRETTY_NAME:-unknown}"
+    . /etc/os-release; { [ "${ID:-}" = debian ] && { [ "${VERSION_ID:-}" = 12 ] || [ "${VERSION_ID:-}" = 13 ]; }; } || warn "expected Debian 12 or 13, found ${PRETTY_NAME:-unknown}"
   fi
   [ "$(uname -m)" = aarch64 ] || warn "expected arm64 (aarch64), found $(uname -m)"
   local d="$PREFIX/"; while [ ! -d "$d" ]; do d="$(dirname "$d")"; done
   local free; free="$(df -Pm "$d" | awk 'NR==2{print $4}')"
   local need="${UNIPI_MIN_FREE_MB:-500}"
   [ "${free:-0}" -ge "$need" ] || die "less than $need MB free on $d (${free} MB)" 2
-  if [ "$LIVE" = 1 ]; then
+  if [ "$LIVE" = 1 ] && [ -z "${UNIPI_SKIP_NET_CHECK:-}" ]; then
+    # TCP only, in bash: a fresh image may have just python3-minimal (no urllib/http) until step 2 has run
     local hosts="github.com pypi.org"; [ "$SKIP_EVOK" = 1 ] || hosts="repo.unipi.technology $hosts"
     [ -n "$WHEEL" ] && hosts="repo.unipi.technology github.com"
+    local h
     for h in $hosts; do
-      python3 - "$h" <<'PY' || die "cannot reach https://$h (DNS/HTTPS)" 3
-import sys, urllib.request
-urllib.request.urlopen(urllib.request.Request(f"https://{sys.argv[1]}/", method="HEAD"), timeout=10)
-PY
+      timeout 10 bash -c "exec 3<>/dev/tcp/$h/443" 2>/dev/null || die "cannot reach $h:443 (DNS/network)" 3
     done
   fi
   # where does the release come from?
@@ -91,7 +89,6 @@ PY
     git -C "$SRC" rev-parse -q --verify "refs/tags/$TAG^{commit}" >/dev/null || die "tag $TAG not found in $SRC (git fetch --tags?)" 2
   fi
   [ -z "$SITE" ] || [ -f "$SITE" ] || die "site bundle $SITE not found" 2
-  [ -z "$SITE" ] || python3 "$HERE/site_bundle.py" list "$SITE" >/dev/null || die "site bundle $SITE is damaged" 2
   # option combinations that must fail BEFORE anything is changed
   if [ "$HARDEN" = 1 ]; then
     [ -n "$AUTH_KEY" ] && [ "$KEY_VERIFIED" = 1 ] || die "--harden-ssh needs --authorized-key and --key-login-verified (you confirm that a key login works, or you lock yourself out)" 2
@@ -102,16 +99,32 @@ PY
 }
 
 # ------------------------------------------------------------------------------------------------- 2. apt prerequisites
+# The Unipi BaseOS ships python3-minimal only (no http, tarfile, venv ...): install the full interpreter first.
+python_full() { python3 -c 'import http.client, tarfile, hashlib, json, venv, ensurepip' >/dev/null 2>&1; }
+
 step_apt() {
   say "step 2/8 apt prerequisites"
   [ "$LIVE" = 1 ] || { say "  (prefix mode: skipped)"; return 0; }
   local missing=() p
-  for p in python3-venv python3-pip git ca-certificates; do dpkg -s "$p" >/dev/null 2>&1 || missing+=("$p"); done
+  for p in python3 python3-venv python3-pip git ca-certificates; do dpkg -s "$p" >/dev/null 2>&1 || missing+=("$p"); done
   if [ "${#missing[@]}" -gt 0 ]; then
-    act apt-get update -q; act env DEBIAN_FRONTEND=noninteractive apt-get install -y -q "${missing[@]}"
+    if [ "$DRY" = 1 ]; then echo "  WOULD: apt-get update && apt-get install -y ${missing[*]}"
+    else
+      act apt-get update -q; act env DEBIAN_FRONTEND=noninteractive apt-get install -y -q "${missing[@]}"
+    fi
     changed "installed packages: ${missing[*]}"
   fi
   DONE+=(apt)
+}
+
+# Checks that need a complete python: the site bundle must be intact BEFORE anything is changed beyond packages.
+step_checks() {
+  if [ -n "$SITE" ]; then
+    if python_full; then
+      python3 "$HERE/site_bundle.py" list "$SITE" >/dev/null || die "site bundle $SITE is damaged" 2
+    elif [ "$DRY" = 1 ]; then say "  (dry run: python3 is not complete yet on this image, site bundle not verified)"
+    else die "python3 is incomplete after the package step" 1; fi
+  fi
 }
 
 # ------------------------------------------------------------------------------------------------- 3+4. Unipi repo, evok
@@ -120,6 +133,10 @@ step_evok() {
   if [ "$SKIP_EVOK" = 1 ]; then say "  (--skip-evok)"; fi
   if [ "$LIVE" = 1 ] && [ "$SKIP_EVOK" = 0 ]; then
     local cand; cand="$(apt-cache policy evok 2>/dev/null | awk '/Candidate:/{print $2}')"
+    if { [ -z "$cand" ] || [ "$cand" = "(none)" ]; } && [ "$DRY" = 0 ]; then       # stale package lists on a fresh image?
+      apt-get update -q >/dev/null 2>&1 || true
+      cand="$(apt-cache policy evok 2>/dev/null | awk '/Candidate:/{print $2}')"
+    fi
     if [ -z "$cand" ] || [ "$cand" = "(none)" ]; then
       local f; f="$(mktemp)"
       python3 - "$UNIPI_SCRIPT_URL" "$f" <<'PY' || die "cannot download $UNIPI_SCRIPT_URL" 3
@@ -137,7 +154,9 @@ PY
     if ! dpkg -s evok >/dev/null 2>&1; then act env DEBIAN_FRONTEND=noninteractive apt-get install -y -q evok; changed "installed evok"; fi
   fi
   # evok's own config (describes the extensions) comes from the site bundle
-  if [ -n "$SITE" ] && python3 "$HERE/site_bundle.py" list "$SITE" | grep -q 'etc-evok/config.yaml'; then
+  if [ -n "$SITE" ] && [ "$DRY" = 1 ] && ! python_full; then
+    say "  (dry run: cannot inspect the site bundle for an evok config yet)"
+  elif [ -n "$SITE" ] && python3 "$HERE/site_bundle.py" list "$SITE" | grep -q 'etc-evok/config.yaml'; then
     local tmp; tmp="$(mktemp -d)"
     python3 "$HERE/site_bundle.py" import "$SITE" --prefix "$tmp" --only evok --force >/dev/null
     if ! cmp -s "$tmp/etc/evok/config.yaml" "$EVOK_CFG" 2>/dev/null; then
@@ -187,7 +206,7 @@ step_release() {
   r="$(release_venv "$OPT" "$TAG" "$WHEEL")" || die "cannot create the python environment" 1
   [ "${r%% *}" = created ] && changed "python environment ${r#* } built"
   r="$(release_flip "$OPT" "$TAG")" || die "cannot switch to $TAG" 1
-  [ "$r" = flipped ] && changed "current -> $TAG"
+  [ "$r" = flipped ] && { changed "current -> $TAG"; NEED_RESTART=1; }
   [ "$LIVE" = 1 ] && chown -R "$SVC_USER:$SVC_USER" "$OPT" 2>/dev/null || true
   DONE+=(release)
 }
@@ -197,9 +216,10 @@ step_site() {
   say "step 6/8 site configuration"
   if [ -n "$SITE" ]; then
     local own=() l; [ "$LIVE" = 1 ] && [ "$(id -u)" = 0 ] && own=(--owner "$SVC_USER")
-    if [ "$DRY" = 1 ]; then python3 "$HERE/site_bundle.py" import "$SITE" --prefix "${PREFIX:-/}" --only unipi --dry-run
+    if [ "$DRY" = 1 ] && ! python_full; then say "  (dry run: would import the site bundle into $ETC and $VAR)"
+    elif [ "$DRY" = 1 ]; then python3 "$HERE/site_bundle.py" import "$SITE" --prefix "${PREFIX:-/}" --only unipi --dry-run
     else
-      while read -r l; do changed "site: $l"; done < <(python3 "$HERE/site_bundle.py" import "$SITE" --prefix "${PREFIX:-/}" --only unipi "${own[@]}" | grep -E '^\s+(create|replace)' || true)
+      while read -r l; do changed "site: $l"; NEED_RESTART=1; done < <(python3 "$HERE/site_bundle.py" import "$SITE" --prefix "${PREFIX:-/}" --only unipi "${own[@]}" | grep -E '^\s+(create|replace)' || true)
     fi
   elif [ ! -f "$ETC/config.json" ]; then
     warn "no --site bundle and no $ETC/config.json: copy config.example.json there, edit it, then run this again"
@@ -220,17 +240,40 @@ step_service() {
   if [ "$DRY" = 1 ]; then echo "  WOULD: install hass-unipi.service, enable and start it, wait for a fresh healthy report"; return 0; fi
   [ -f "$unit_src" ] || die "release has no systemd/hass-unipi.service" 1
   if ! cmp -s "$unit_src" "$UNIT_DST" 2>/dev/null; then
-    mkdir -p "$(dirname "$UNIT_DST")"; install -m 0644 "$unit_src" "$UNIT_DST"; changed "installed $UNIT_DST"
+    mkdir -p "$(dirname "$UNIT_DST")"; install -m 0644 "$unit_src" "$UNIT_DST"; changed "installed $UNIT_DST"; NEED_RESTART=1
     [ "$LIVE" = 1 ] && "${SYSTEMCTL[@]}" daemon-reload
   fi
   if [ "$LIVE" = 0 ]; then say "  (prefix mode: not enabling the service)"; return 0; fi
   if [ "${NO_CONFIG:-0}" = 1 ]; then say "  (no configuration yet: service not started)"; return 0; fi
   if ! "${SYSTEMCTL[@]}" is-enabled hass-unipi >/dev/null 2>&1; then "${SYSTEMCTL[@]}" enable hass-unipi >/dev/null 2>&1; changed "service enabled"; fi
-  if ! "${SYSTEMCTL[@]}" is-active hass-unipi >/dev/null 2>&1; then "${SYSTEMCTL[@]}" start hass-unipi; changed "service started"; fi
-  local hc="${UNIPI_HEALTHCHECK:-$OPT/current/.venv/bin/python $OPT/current/tools/healthcheck.py}"
-  if $hc --fresh --timeout 150 --config "$ETC/config.json" --state-dir "$VAR" --runtime "$OPT/current"; then say "  healthy"
-  else die "the service started but the health check failed (journalctl -u hass-unipi); rollback: tools/rollback.sh previous" 1; fi
+  if ! "${SYSTEMCTL[@]}" is-active hass-unipi >/dev/null 2>&1; then
+    "${SYSTEMCTL[@]}" start hass-unipi; changed "service started"; STARTED_NOW=1
+  elif [ "$NEED_RESTART" = 1 ]; then
+    "${SYSTEMCTL[@]}" restart hass-unipi; changed "service restarted (release/config/unit changed)"; STARTED_NOW=1
+  fi
+  # A restart produces fresh publishes (--fresh proves it). A service that was already running and untouched does not.
+  local hc="${UNIPI_HEALTHCHECK:-$OPT/current/.venv/bin/python $OPT/current/tools/healthcheck.py}" fresh=()
+  [ "$STARTED_NOW" = 1 ] && fresh=(--fresh)
+  if $hc "${fresh[@]}" --timeout 150 --config "$ETC/config.json" --state-dir "$VAR" --runtime "$OPT/current"; then say "  healthy"
+  else die "the service is not healthy (journalctl -u hass-unipi); rollback: tools/rollback.sh previous" 1; fi
   DONE+=(service)
+}
+
+# ------------------------------------------------------------------------------------------------- 7b. sudo for the service user
+# deploy/rollback and the extension watchdog restart services as the service user (`sudo -n systemctl ...`).
+# BaseOS asks for a password on every sudo, so allow exactly these commands without one.
+step_sudoers() {
+  [ "$LIVE" = 1 ] || return 0
+  # The LAST matching sudoers rule wins and files in sudoers.d are read in name order; BaseOS ships a later "unipi" file
+  # that demands a password for everything, so ours must sort after it ("zz-").
+  local f=/etc/sudoers.d/zz-hass-unipi sc; sc="$(command -v systemctl)"
+  local want; want="$(printf '%s ALL=(root) NOPASSWD: %s restart hass-unipi, %s restart evok\n' "$SVC_USER" "$sc" "$sc")"
+  [ "$DRY" = 1 ] || rm -f /etc/sudoers.d/hass-unipi          # earlier name (sorted too early to ever apply)
+  if [ "$(cat "$f" 2>/dev/null)" = "$want" ]; then return 0; fi
+  if [ "$DRY" = 1 ]; then echo "  WOULD: allow $SVC_USER to run '$sc restart hass-unipi|evok' without a password ($f)"; return 0; fi
+  local tmp; tmp="$(mktemp)"; printf '%s\n' "$want" > "$tmp"
+  visudo -cf "$tmp" >/dev/null || { rm -f "$tmp"; die "generated sudoers rule is invalid; not installing it" 1; }
+  install -m 0440 -o root -g root "$tmp" "$f"; rm -f "$tmp"; changed "sudo rule for service restarts installed ($f)"
 }
 
 # ------------------------------------------------------------------------------------------------- 8. optional extras
@@ -277,6 +320,6 @@ summary() {
   fi
 }
 
-step_preflight; step_apt; step_evok; step_release; step_site; step_service; step_extras
+step_preflight; step_apt; step_checks; step_evok; step_release; step_site; step_sudoers; step_service; step_extras
 persist_state
 summary

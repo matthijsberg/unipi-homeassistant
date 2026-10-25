@@ -47,16 +47,25 @@ def main() -> int:
     ap.add_argument("--skip-systemd", action="store_true", help="MQTT checks only (tests)")
     a = ap.parse_args()
 
-    try:
-        cfg = json.load(open(a.config or os.path.join(a.runtime, "config.json")))["mqtt"]
-        device = open(os.path.join(a.state_dir or a.runtime, ".device_name")).read().strip()
-        version = a.expect_version
-        if not version:
-            m = re.search(r'^SCRIPT_VERSION\s*=\s*"([^"]+)"', open(os.path.join(a.runtime, "hass-unipi.py")).read(), re.M)
-            version = m.group(1) if m else None
-    except Exception as e:
-        print(f"healthcheck: cannot evaluate: {e}", file=sys.stderr)
-        return 2
+    # On a first install the bridge writes .device_name only after its first discovery (~10-20 s after start):
+    # wait for it instead of giving up at once.
+    wait_until = time.monotonic() + a.timeout
+    while True:
+        try:
+            cfg = json.load(open(a.config or os.path.join(a.runtime, "config.json")))["mqtt"]
+            device = open(os.path.join(a.state_dir or a.runtime, ".device_name")).read().strip()
+            if not device:
+                raise ValueError("empty .device_name")
+            version = a.expect_version
+            if not version:
+                m = re.search(r'^SCRIPT_VERSION\s*=\s*"([^"]+)"', open(os.path.join(a.runtime, "hass-unipi.py")).read(), re.M)
+                version = m.group(1) if m else None
+            break
+        except Exception as e:
+            if time.monotonic() >= wait_until:
+                print(f"healthcheck: cannot evaluate: {e}", file=sys.stderr)
+                return 2
+            time.sleep(2)
     root = cfg.get("topic", "unipi")
     topics = {
         "status": f"{root}/{device}/status",

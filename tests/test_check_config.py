@@ -81,3 +81,13 @@ def test_device_name_cache_follows_the_env_at_import_time(tmp_path):
                                      env={**{k: v for k, v in os.environ.items() if k != "UNIPI_HA_STATE_DIR"}, **env}).stdout.strip().splitlines()[-1]
     assert out({}) == str(ROOT / ".device_name")
     assert out({"UNIPI_HA_STATE_DIR": str(tmp_path)}) == str(tmp_path / ".device_name")
+
+
+def test_requirements_declare_what_python_pam_needs_but_does_not_declare():
+    """python-pam 2.0.2 imports `six` without declaring it: a fresh venv (Debian 13 M203) had no web login (HTTP 500)."""
+    reqs = {l.split("==")[0].strip().lower() for l in (ROOT / "requirements.txt").read_text().splitlines() if "==" in l}
+    assert {"python-pam", "six"} <= reqs
+
+
+def test_pam_imports_in_the_environment_the_tests_run_in():
+    import pam  # noqa: F401  (a real import: ImportError here = the login would be dead)

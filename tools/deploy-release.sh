@@ -48,16 +48,16 @@ site="$BACKUPS/$(date -u +%Y%m%dT%H%M%SZ)-pre-$tag.site.tgz"
 python3 "$HERE/site_bundle.py" export --prefix "${PREFIX:-/}" --out "$site" >/dev/null && log "site files saved: $site" || log "WARNING: could not save the site files"
 
 # --- switch ------------------------------------------------------------------------------------------
-restarts_before="$("${SYSTEMCTL[@]}" show "$SERVICE" -pNRestarts 2>/dev/null | sed -n 's/^NRestarts=//p' || true)"
 release_flip "$OPT" "$tag" >/dev/null; log "current -> $tag (was $prev)"
-log "restarting $SERVICE"; "${SYSTEMCTL[@]}" restart "$SERVICE"
-if healthy "$new_version"; then
+log "restarting $SERVICE"
+# A restart that cannot even be issued (e.g. no sudo right) must take the same way back as an unhealthy release.
+if "${SYSTEMCTL[@]}" restart "$SERVICE" && healthy "$new_version"; then
   release_prune "$OPT" 5; log "SUCCESS"; exit 0
 fi
-log "HEALTH CHECK FAILED"
+log "RESTART OR HEALTH CHECK FAILED"
 if [ "$auto_rollback" = 1 ] && [ "$prev" != "$tag" ]; then
   log "flipping back to $prev"
-  release_flip "$OPT" "$prev" >/dev/null; "${SYSTEMCTL[@]}" restart "$SERVICE"
-  if healthy "$(version_of "$prev")"; then log "rolled back to $prev; service restored"; else log "ROLLBACK ALSO FAILED - manual intervention needed (previous release: $prev)"; exit 3; fi
+  release_flip "$OPT" "$prev" >/dev/null
+  if "${SYSTEMCTL[@]}" restart "$SERVICE" && healthy "$(version_of "$prev")"; then log "rolled back to $prev; service restored"; else log "ROLLBACK ALSO FAILED - manual intervention needed (previous release: $prev)"; exit 3; fi
 fi
 exit 1

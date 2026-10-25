@@ -98,6 +98,9 @@ shared release functions in `tools/lib-release.sh`; release-mode deploy in `tool
 the unit runs `--check-config` before every start. Unipi's repo script: `https://repo.unipi.technology/debian/raspberry-neuron.sh`
 (from the official evok install guide; still to be verified on the real image in T06/T31).
 
+# Validation note (T06, 2026-10-25)
+Run on a real Unipi M203 with BaseOS **Debian 13 (trixie)** (not Debian 12 as assumed above): works; Python is 3.13 and all pinned wheels install. The image has python3-minimal only, the Unipi repo is preconfigured, evok comes from that repo (3.0.6.3~trixie). The bootstrap now accepts Debian 12 and 13, installs the full interpreter first, and adds a narrow sudo rule (`zz-hass-unipi`) for service restarts. Details: T06 Evidence.
+
 # Consequences
 - The L513 rebuild (T31) is scripted and repeatable; a lost SD card is a 20-minute job.
 - The first install on real hardware happens in the maintenance window; everything except
