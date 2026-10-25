@@ -1,0 +1,406 @@
+[
+ {
+  "circuit": "1_01",
+  "description": "PIR 1",
+  "dev": "input",
+  "device_delay": 20,
+  "device_normal": "no",
+  "unipi_value": 0,
+  "unipi_prev_value_timstamp": 0,
+  "state_topic": "site/pir_1"
+ },
+ {
+  "circuit": "1_02",
+  "description": "PIR 2",
+  "dev": "input",
+  "device_delay": 120,
+  "device_normal": "no",
+  "unipi_value": 0,
+  "unipi_prev_value_timstamp": 0,
+  "state_topic": "site/pir_2"
+ },
+ {
+  "circuit": "1_03",
+  "description": "PIR 3",
+  "dev": "input",
+  "device_delay": 30,
+  "device_normal": "no",
+  "unipi_value": 0,
+  "unipi_prev_value_timstamp": 0,
+  "state_topic": "site/pir_3"
+ },
+ {
+  "circuit": "1_04",
+  "description": "PIR 4",
+  "dev": "input",
+  "device_delay": 120,
+  "device_normal": "no",
+  "unipi_value": 0,
+  "unipi_prev_value_timstamp": 0,
+  "state_topic": "site/pir_4"
+ },
+ {
+  "circuit": "2_01",
+  "description": "PIR 5",
+  "dev": "input",
+  "device_delay": 30,
+  "device_normal": "no",
+  "unipi_value": 0,
+  "unipi_prev_value_timstamp": 0,
+  "state_topic": "site/pir_5"
+ },
+ {
+  "circuit": "2_02",
+  "description": "Bell button 1",
+  "dev": "input",
+  "handle_local": {
+   "type": "bel",
+   "trigger": "on",
+   "rings": 2,
+   "output_dev": "output",
+   "output_circuit": "2_02"
+  },
+  "device_delay": 0,
+  "device_normal": "no",
+  "state_topic": "site/bell_button_1"
+ },
+ {
+  "circuit": "2_03",
+  "description": "Contact 1",
+  "dev": "input",
+  "device_normal": "nc",
+  "state_topic": "site/contact_1"
+ },
+ {
+  "circuit": "2_04",
+  "description": "PIR 6",
+  "dev": "input",
+  "device_delay": 30,
+  "device_normal": "no",
+  "unipi_value": 0,
+  "unipi_prev_value_timstamp": 0,
+  "state_topic": "site/pir_6"
+ },
+ {
+  "circuit": "2_05",
+  "description": "Bell button 2",
+  "dev": "input",
+  "handle_local": {
+   "type": "bel",
+   "trigger": "on",
+   "rings": 3,
+   "output_dev": "output",
+   "output_circuit": "2_02"
+  },
+  "device_delay": 0,
+  "device_normal": "no",
+  "state_topic": "site/bell_button_2"
+ },
+ {
+  "circuit": "2_06",
+  "description": "Contact 2",
+  "dev": "input",
+  "device_normal": "nc",
+  "state_topic": "site/contact_2"
+ },
+ {
+  "circuit": "3_01",
+  "description": "Contact 3",
+  "dev": "input",
+  "device_normal": "nc",
+  "state_topic": "site/contact_3"
+ },
+ {
+  "circuit": "3_02",
+  "description": "Light switch 1",
+  "dev": "input",
+  "handle_local": {
+   "type": "dimmer",
+   "output_dev": "analogoutput",
+   "output_circuit": "2_03",
+   "level": 10
+  },
+  "device_normal": "no",
+  "state_topic": "site/light_switch_1"
+ },
+ {
+  "circuit": "3_03",
+  "description": "PIR 7",
+  "dev": "input",
+  "device_delay": 30,
+  "device_normal": "no",
+  "unipi_value": 0,
+  "unipi_prev_value_timstamp": 0,
+  "state_topic": "site/pir_7"
+ },
+ {
+  "circuit": "3_04",
+  "description": "Contact 4",
+  "dev": "input",
+  "device_normal": "nc",
+  "unipi_value": 1,
+  "unipi_prev_value_timstamp": 0,
+  "state_topic": "site/contact_4"
+ },
+ {
+  "circuit": "3_05",
+  "description": "Light switch 2",
+  "dev": "input",
+  "handle_local": {
+   "type": "dimmer",
+   "output_dev": "analogoutput",
+   "output_circuit": "2_01",
+   "level": 10
+  },
+  "device_normal": "no",
+  "state_topic": "site/light_switch_2"
+ },
+ {
+  "circuit": "3_06",
+  "description": "Input 1",
+  "dev": "input",
+  "device_normal": "no",
+  "state_topic": "site/input_1"
+ },
+ {
+  "circuit": "UART_4_4_01",
+  "description": "Contact 5",
+  "dev": "input",
+  "device_normal": "nc",
+  "state_topic": "site/contact_5"
+ },
+ {
+  "circuit": "UART_4_4_02",
+  "description": "Water meter",
+  "dev": "input",
+  "device_type": "counter",
+  "unipi_value": 0,
+  "counter_value": 0,
+  "device_delay": 10,
+  "device_normal": "no",
+  "unipi_prev_value_timstamp": 0,
+  "state_topic": "site/water_meter"
+ },
+ {
+  "circuit": "UART_4_4_03",
+  "description": "Light switch 3",
+  "dev": "input",
+  "handle_local": {
+   "type": "dimmer",
+   "output_dev": "analogoutput",
+   "output_circuit": "2_04",
+   "level": 5
+  },
+  "device_normal": "no",
+  "state_topic": "site/light_switch_3"
+ },
+ {
+  "circuit": "UART_4_4_04",
+  "description": "Light switch 4",
+  "dev": "input",
+  "handle_local": {
+   "type": "dimmer",
+   "output_dev": "analogoutput",
+   "output_circuit": "3_01",
+   "level": 5
+  },
+  "device_normal": "no",
+  "state_topic": "site/light_switch_4"
+ },
+ {
+  "circuit": "UART_4_4_05",
+  "description": "Light switch 5",
+  "dev": "input",
+  "handle_local": {
+   "type": "dimmer",
+   "output_dev": "analogoutput",
+   "output_circuit": "2_03",
+   "level": 10
+  },
+  "device_normal": "no",
+  "state_topic": "site/light_switch_5"
+ },
+ {
+  "circuit": "UART_4_4_06",
+  "description": "Light switch 6",
+  "dev": "input",
+  "handle_local": {
+   "type": "dimmer",
+   "output_dev": "analogoutput",
+   "output_circuit": "2_02",
+   "level": 10
+  },
+  "device_normal": "no",
+  "state_topic": "site/light_switch_6"
+ },
+ {
+  "circuit": "UART_4_4_07",
+  "description": "PIR 8",
+  "dev": "input",
+  "device_delay": 90,
+  "device_normal": "no",
+  "unipi_value": 0,
+  "unipi_prev_value_timstamp": 0,
+  "state_topic": "site/pir_8"
+ },
+ {
+  "circuit": "UART_4_4_12",
+  "description": "Leak sensor 1",
+  "dev": "input",
+  "device_normal": "no",
+  "state_topic": "site/leak_sensor_1"
+ },
+ {
+  "circuit": "UART_4_4_13",
+  "description": "Leak sensor 2",
+  "dev": "input",
+  "device_normal": "no",
+  "state_topic": "site/leak_sensor_2"
+ },
+ {
+  "circuit": "UART_4_4_14",
+  "description": "Leak sensor 3",
+  "dev": "input",
+  "device_normal": "no",
+  "state_topic": "site/leak_sensor_3"
+ },
+ {
+  "circuit": "UART_4_4_16",
+  "description": "Lock 1",
+  "dev": "input",
+  "device_normal": "nc",
+  "state_topic": "site/lock_1"
+ },
+ {
+  "circuit": "UART_4_4_15",
+  "description": "Lock 2",
+  "dev": "input",
+  "device_normal": "nc",
+  "state_topic": "site/lock_2"
+ },
+ {
+  "circuit": "1_01",
+  "description": "Lux sensor 1",
+  "dev": "ai",
+  "device_normal": "no",
+  "interval": 60,
+  "state_topic": "site/lux_sensor_1"
+ },
+ {
+  "circuit": "2_01",
+  "description": "Lux sensor 2",
+  "dev": "ai",
+  "device_normal": "no",
+  "interval": 60,
+  "state_topic": "site/lux_sensor_2"
+ },
+ {
+  "circuit": "2_02",
+  "description": "Lux sensor 3",
+  "dev": "ai",
+  "device_normal": "no",
+  "interval": 60,
+  "state_topic": "site/lux_sensor_3"
+ },
+ {
+  "circuit": "3_01",
+  "description": "Lux sensor 4",
+  "dev": "ai",
+  "device_normal": "no",
+  "interval": 60,
+  "state_topic": "site/lux_sensor_4"
+ },
+ {
+  "circuit": "2_03",
+  "description": "Lux sensor 5",
+  "dev": "ai",
+  "device_normal": "no",
+  "interval": 60,
+  "state_topic": "site/lux_sensor_5"
+ },
+ {
+  "circuit": "2_04",
+  "description": "Lux sensor 6",
+  "dev": "ai",
+  "device_normal": "no",
+  "interval": 60,
+  "state_topic": "site/lux_sensor_6"
+ },
+ {
+  "circuit": "28D1EFA708000052",
+  "description": "Temperature sensor 1",
+  "dev": "temp",
+  "interval": 9,
+  "state_topic": "site/temperature_sensor_1"
+ },
+ {
+  "circuit": "26729616020000C2",
+  "description": "Temperature sensor 2",
+  "dev": "temp",
+  "interval": 9,
+  "state_topic": "site/temperature_sensor_2"
+ },
+ {
+  "circuit": "26729616020000C2",
+  "description": "Humidity sensor 1",
+  "dev": "humidity",
+  "interval": 9,
+  "state_topic": "site/humidity_sensor_1"
+ },
+ {
+  "circuit": "288D219F0A0000",
+  "description": "Temperature sensor 3",
+  "dev": "temp",
+  "interval": 4,
+  "state_topic": "site/temperature_sensor_3"
+ },
+ {
+  "circuit": "28E97B2E0E00002D",
+  "description": "Temperature sensor 4",
+  "dev": "temp",
+  "interval": 4,
+  "state_topic": "site/temperature_sensor_4"
+ },
+ {
+  "circuit": "2875092F0E000080",
+  "description": "Temperature sensor 5",
+  "dev": "temp",
+  "interval": 4,
+  "state_topic": "site/temperature_sensor_5"
+ },
+ {
+  "circuit": "2836DF2D0E000069",
+  "description": "Temperature sensor 6",
+  "dev": "temp",
+  "interval": 4,
+  "state_topic": "site/temperature_sensor_6"
+ },
+ {
+  "circuit": "287C392E0E00001D",
+  "description": "Temperature sensor 7",
+  "dev": "temp",
+  "interval": 4,
+  "state_topic": "site/temperature_sensor_7"
+ },
+ {
+  "circuit": "28F404490E000028",
+  "description": "Temperature sensor 8",
+  "dev": "temp",
+  "interval": 4,
+  "state_topic": "site/temperature_sensor_8"
+ },
+ {
+  "circuit": "2863E7960E000013",
+  "description": "Temperature sensor 9",
+  "dev": "temp",
+  "interval": 4,
+  "state_topic": "site/temperature_sensor_9"
+ },
+ {
+  "circuit": "2862FE950E000023",
+  "description": "Temperature sensor 10",
+  "dev": "temp",
+  "interval": 4,
+  "state_topic": "site/temperature_sensor_10"
+ }
+]

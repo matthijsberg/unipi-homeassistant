@@ -4,7 +4,7 @@ id: T22
 title: "Convert the old unipi_mqtt_config.json into core config, rules and legacy map"
 description: "tools/convert_legacy.py turns the old per-circuit config plus the evok-3 circuit map into circuits config, local_rules.json entries and legacy_map.json, with a human-readable diff report."
 phase: 2
-task_status: todo
+task_status: done
 depends_on: [T21]
 risk: medium
 human_gate: false
@@ -74,3 +74,8 @@ Delete tool; nothing live.
 # Evidence
 
 # Open questions
+
+# Evidence (2026-10-25)
+Built as `tools/legacy_to_site.py` (the adapter it was meant to feed was dropped, see T21): reads the legacy `unipi_mqtt_config.json` (+ optionally Matthijs' HA export and the L513 evok-2 snapshot) and writes `circuits.json` (names, device classes, inversion for NC contacts, the water-meter counter, safety limits for the bell relay and the roof-window relays), `local_rules.json` (8 rules: 2 doorbells, 6 light switches, legacy semantics) and a map document (old HA entity/topic -> new circuit/topic/name, how to switch HA over without losing entity ids, and the 9 functions that move to Home Assistant). Tests: `tests/test_legacy_to_site.py` (14; run against an anonymised copy of the real config `tests/fixtures/l513_legacy_config_anonymized.json`; includes the doorbell ringing 3x with the old 100/300 ms timing and a light switch toggling through the real bridge). 16 mutation checks, 1 survivor found and closed. The real pack lives in the git-ignored private overlay `docs/knowledge/local/l513/`.
+Open: the xS30 circuit naming (`UART_4_4_NN` -> `xS30_NN`) is an assumption until the evok-3 listing of the real card exists (T31: run the tool with `--evok3-rest`); the boiler temperature sensor in the legacy config does not exist on the L513 (the HA entity never had data).
+

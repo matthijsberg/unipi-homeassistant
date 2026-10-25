@@ -40,8 +40,8 @@ T14/T15/T16/T18 can run in parallel after T11 (different files, except small hoo
 # Phase 2 — Legacy adapter (L513 still untouched)
 
 * [T20 Capture the complete legacy HA contract](T20-capture-legacy-contract.md) - 🔒 · low · deps: T01 · todo (can start any time after T01)
-* [T21 legacy_adapter.py behind legacy.enabled](T21-legacy-adapter.md) - **high** · deps: T12, T14–T17, T20 · todo
-* [T22 Old-config converter](T22-legacy-config-converter.md) - medium · deps: T21 · todo
+* [T21 legacy_adapter.py behind legacy.enabled](T21-legacy-adapter.md) - ~~dropped~~ (2026-10-25, Matthijs): Home Assistant is migrated directly to the new topics/entities; no adapter
+* [T22 Old-config converter](T22-legacy-config-converter.md) - medium · **done 2026-10-25**: `tools/legacy_to_site.py` (circuits + local rules + old->new map for HA); real pack in the private overlay `docs/knowledge/local/l513/`
 * [T23 End-to-end validation + v2.3.0](T23-legacy-validation.md) - 🔒 · medium · deps: T18, T21, T22 · todo
 
 # Phase 3 — L513 upgrade and cutover (maintenance window)
