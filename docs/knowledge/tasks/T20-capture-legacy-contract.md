@@ -64,5 +64,7 @@ Nothing changed.
 Both concepts + `/log.md`; open questions in interface-legacy closed.
 
 # Evidence
+- 2026-10-25: step 2 started - `tools/mqtt_capture.py` (read-only; 4 tests, can never publish) records `unipi/#`, `unipi1/#`, `unipi2/#` for 26 h on the M203 (test user on the HA broker). First findings in `/context/interface-legacy.md` ("Observed on the HA broker"). Still needed from Matthijs: the Home Assistant side (YAML/UI entities + automations that use these topics), what `unipi2` is, and a guided manual test session - see the chat of that day.
+
 
 # Open questions

@@ -93,3 +93,13 @@ Mapping in the current config: `3_02` and `UART_4_4_05` → AO `2_03` (bijkeuken
 - `ring_bel` posts every ON/OFF twice (bug, harmless). Do not reproduce.
 - Retained junk exists (typos like `serre/vllugel_hoek`, case duplicates `lekkage-Keukenkasten`)
   → cleaned in T41.
+
+# Observed on the HA broker, 2026-10-25 (T20, first pass; read-only, from retained messages and a 15 s sample)
+- The uploaded `unipi_mqtt_config.json` is **byte-identical in content** to the copy already in `legacy/old_unipi_mqtt/` (45 entries: 28 inputs, 10 temp, 6 ai, 1 humidity; 8 `handle_local`: 6 dimmers, 2 bells).
+- **Three topic roots** are in use: `unipi/...` (sensor states, per area, mostly *not* retained plus a retained `<state_topic>/available`), `unipi1/...` (this L513: outputs, commands, `/set`) and **`unipi2/...` = a second legacy Unipi** (irrigation zones 1-4, veranda lights and relays, garden-stairs and conservatory-curtain lights, `UART_2_2_xx` circuits). `unipi2` is not described by anything in this repository yet.
+- **Command/state payloads are JSON**: relays `{"circuit": "2_02", "dev": "relay", "state": "on|off"}`; analog outputs add `"brightness": 0-255` and `"transition": <seconds, float>`; the roof window is `{"dev": "output", "circuit": "1_01", "state": "on", "duration": 35}` (a **timed** output, 35 s). Output topics come in pairs `<topic>` (state) and `<topic>/set` (command); the bell state topic is `unipi1/bgg/hal/bel`.
+- **Ventilation** uses `unipi1/eerste/ventilatie/{state,percentage,percentage/state}` with analog circuits `3_02` / `3_03` (the exact roles are still to be read from the capture). **Heat-pump smart grid** = relays `3_01`/`3_02` (`unipi1/warmtepomp/smartgrid/relay3_1|2`).
+- **Stale/duplicate topics** exist on the broker: typos and old names (`vllugel_hoek`, `lekkage-Keukenkasten`, `lekkage-koelkast`, `serre/vleugel_*`, `woonkamer/vleugel_*`) with retained `OFF` and no producer in the config (K12).
+- Many sensor topics (lux every 60 s, 1-wire every 4-9 s) are not retained: 16 of 44 configured topics were silent in the 15 s sample (expected).
+- A **26-hour read-only recording** (`tools/mqtt_capture.py`, subscribes to `unipi/#`, `unipi1/#`, `unipi2/#` only) started 2026-10-25 on the M203; the file stays on that machine and out of git (it contains household behaviour).
+
